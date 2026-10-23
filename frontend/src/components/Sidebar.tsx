@@ -87,7 +87,7 @@ export const Sidebar: React.FC = () => {
             </div>
             <div className="flex flex-col min-w-0">
               <span className="font-bold text-sm tracking-wide text-white truncate flex items-center gap-1.5">
-                PUVA EVAL-CORE
+                Dashboard Monitoring Dealer Utama
                 <span className="text-[10px] font-semibold text-emerald-400 bg-emerald-950/80 border border-emerald-500/30 px-1.5 py-0.2 rounded">
                   v2.0
                 </span>

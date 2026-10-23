@@ -1,0 +1,8 @@
+Kebutuhan Data
+1. Data kuotasi matchmaking OIS raw -> ds antasena
+2. Data dealdone matchmaking OIS raw -> ds antasena
+3. Rule mid price 1 & 2
+4. Transaksi PUAB
+5. Dokumen M01 dan M02
+6. Data Counterparty Line
+7. Diskusi dg Mba Mila
