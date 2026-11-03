@@ -8,6 +8,7 @@ import os
 import json
 import logging
 from typing import Dict, Any, Optional
+import requests
 
 logger = logging.getLogger("ai_reconciliation")
 
@@ -138,19 +139,17 @@ def analyze_dispute_with_ai(
 ) -> Dict[str, Any]:
     """
     Eksekusi analisis AI untuk verifikasi bukti sanggahan:
-    Mencoba memanggil Gemini API via google-genai jika GEMINI_API_KEY tersedia,
-    atau menggunakan Fallback Deterministic Rule Analyzer jika tidak tersedia.
+    Mencoba memanggil Google Gemini API via REST dengan fallback model chain dan timeout ketat.
+    Jika API gagal atau tidak tersedia, otomatis menggunakan Fallback Deterministic Rule Analyzer.
     """
     api_key = os.environ.get("GEMINI_API_KEY")
 
     if api_key:
-        try:
-            from google import genai
-            from google.genai import types
+        # Prioritas model: gunakan GEMINI_MODEL jika didefinisikan, atau default ke gemini-3.5-flash
+        custom_model = os.environ.get("GEMINI_MODEL")
+        candidate_models = [custom_model] if custom_model else ["gemini-3.5-flash", "gemini-3.8-flash"]
 
-            client = genai.Client(api_key=api_key)
-
-            user_prompt = f"""
+        user_prompt = f"""
 Parameter Evaluasi: {parameter_code}
 Bank Dealer Utama: {bank_alias} (Nama resmi telah disamarkan demi privasi perbankan)
 Tahap Threshold Aktif: {stage}
@@ -164,30 +163,49 @@ Rincian Catatan Transaksi Tidak Memenuhi Syarat:
 Lakukan analisis kepatuhan regulasi terhadap PADG No. 23/2024 dan berikan rekomendasi output dalam format JSON sesuai spesifikasi system prompt.
 """
 
-            response = client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=user_prompt,
-                config=types.GenerateContentConfig(
-                    system_instruction=SYSTEM_PROMPT,
-                    temperature=0.1,
-                    response_mime_type="application/json",
-                ),
-            )
-
-            if response and response.text:
-                parsed = json.loads(response.text)
-                return {
-                    "recommendation_status": parsed.get("recommendation_status", "PARTIAL_REVIEW"),
-                    "confidence_score": float(parsed.get("confidence_score", 0.90)),
-                    "regulatory_reference": parsed.get("regulatory_reference", "PADG No. 23/2024"),
-                    "analysis_text": parsed.get("analysis_text", response.text),
-                    "suggested_action": parsed.get("suggested_action", "Verifikasi petugas"),
-                    "engine_used": "Gemini 2.5 Flash",
+        headers = {"Content-Type": "application/json"}
+        payload = {
+            "systemInstruction": {
+                "parts": [{"text": SYSTEM_PROMPT}]
+            },
+            "contents": [
+                {
+                    "parts": [{"text": user_prompt}]
                 }
-        except Exception as e:
-            logger.warning(f"Gemini API invocation failed ({e}), using deterministic analyzer fallback.")
+            ],
+            "generationConfig": {
+                "temperature": 0.1,
+                "responseMimeType": "application/json",
+            },
+        }
 
-    # Gunakan Fallback Deterministic Analyzer
+        for model in candidate_models:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+            try:
+                # Timeout ringkas 4.0 detik agar UI responsif dan tidak hang jika server Google overload (503)
+                resp = requests.post(url, json=payload, headers=headers, timeout=4.0)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    candidates = data.get("candidates", [])
+                    if candidates and "content" in candidates[0]:
+                        parts = candidates[0]["content"].get("parts", [])
+                        if parts and "text" in parts[0]:
+                            raw_text = parts[0]["text"]
+                            parsed = json.loads(raw_text)
+                            return {
+                                "recommendation_status": parsed.get("recommendation_status", "PARTIAL_REVIEW"),
+                                "confidence_score": float(parsed.get("confidence_score", 0.90)),
+                                "regulatory_reference": parsed.get("regulatory_reference", "PADG No. 23/2024"),
+                                "analysis_text": parsed.get("analysis_text", raw_text),
+                                "suggested_action": parsed.get("suggested_action", "Verifikasi petugas"),
+                                "engine_used": f"Gemini AI ({model})",
+                            }
+                else:
+                    logger.warning(f"Gemini API model {model} returned HTTP {resp.status_code}: {resp.text[:120]}")
+            except Exception as e:
+                logger.warning(f"Gemini API call to {model} failed: {e}")
+
+    # Fallback ke Deterministic Rule Engine bila API key tidak ada, offline, atau Google API 503/timeout
     result = run_deterministic_analyzer(
         finding_id=finding_id,
         bank_alias=bank_alias,
@@ -199,5 +217,5 @@ Lakukan analisis kepatuhan regulasi terhadap PADG No. 23/2024 dan berikan rekome
         failed_details=failed_details,
         stage=stage,
     )
-    result["engine_used"] = "PADG Deterministic Rule Engine"
+    result["engine_used"] = "PADG Deterministic Rule Engine (Automated Fallback)"
     return result
