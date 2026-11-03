@@ -31,10 +31,10 @@ export const GlobalTopBar: React.FC = () => {
     refreshData,
   } = useApp()
 
-  const stages: { key: ThresholdStage; label: string; badge: string }[] = [
-    { key: "EARLY", label: "Early State", badge: "80% / 50%" },
-    { key: "INTERMEDIATE", label: "Intermediate", badge: "85% / 70%" },
-    { key: "END_STATE", label: "End-State", badge: "90% / 80%" },
+  const stages: { key: ThresholdStage; label: string }[] = [
+    { key: "EARLY", label: "Early State" },
+    { key: "INTERMEDIATE", label: "Intermediate" },
+    { key: "END_STATE", label: "End-State" },
   ]
 
   return (
@@ -45,13 +45,12 @@ export const GlobalTopBar: React.FC = () => {
           {/* 1. Selector Periode */}
           <div className="flex items-center bg-slate-100/90 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-700 shadow-xs">
             <Calendar className="w-3.5 h-3.5 text-slate-500 mr-2 flex-shrink-0" />
-            <span className="text-[11px] text-slate-400 mr-1.5 font-medium">Periode:</span>
             <select
               value={selectedPeriod}
               onChange={(e) => setSelectedPeriod(e.target.value)}
               className="bg-transparent font-semibold text-slate-800 cursor-pointer focus:outline-none pr-1"
             >
-              <option value="2026-Q2">Triwulan II - 2026 (Aktif)</option>
+              <option value="2026-Q2">Triwulan II - 2026</option>
               <option value="2026-Q1">Triwulan I - 2026</option>
               <option value="2025-Q4">Triwulan IV - 2025</option>
             </select>
@@ -59,10 +58,6 @@ export const GlobalTopBar: React.FC = () => {
 
           {/* 2. Selector Tahap Threshold (Real-time Recalculation) */}
           <div className="flex items-center bg-slate-100/90 p-1 rounded-lg border border-slate-200/80">
-            <div className="flex items-center px-2 text-slate-500 text-[11px] font-medium mr-1 hidden sm:flex">
-              <Layers className="w-3.5 h-3.5 mr-1 text-emerald-600" />
-              <span>Threshold:</span>
-            </div>
             <div className="flex space-x-1">
               {stages.map((st) => {
                 const isSelected = selectedStage === st.key
@@ -71,7 +66,7 @@ export const GlobalTopBar: React.FC = () => {
                     key={st.key}
                     onClick={() => changeStage(st.key)}
                     disabled={isRecalculating}
-                    title={`Pindah ke tahap ${st.label}`}
+                    title={st.label}
                     className={`px-3 py-1 text-xs rounded-md font-medium transition-all duration-150 flex items-center space-x-1.5 ${
                       isSelected
                         ? "bg-emerald-600 text-white shadow-xs font-semibold"
@@ -79,15 +74,6 @@ export const GlobalTopBar: React.FC = () => {
                     } ${isRecalculating ? "opacity-70 cursor-wait" : ""}`}
                   >
                     <span>{st.label}</span>
-                    <span
-                      className={`text-[9px] px-1 py-0.2 rounded font-mono ${
-                        isSelected
-                          ? "bg-emerald-700 text-emerald-100"
-                          : "bg-slate-200 text-slate-500"
-                      }`}
-                    >
-                      {st.badge}
-                    </span>
                   </button>
                 )
               })}
@@ -97,7 +83,7 @@ export const GlobalTopBar: React.FC = () => {
           {isRecalculating && (
             <div className="flex items-center text-xs text-emerald-600 font-medium animate-pulse">
               <RefreshCw className="w-3.5 h-3.5 animate-spin mr-1.5" />
-              <span>Menghitung Ulang Skor...</span>
+              <span>Menghitung Ulang...</span>
             </div>
           )}
         </div>
@@ -107,7 +93,7 @@ export const GlobalTopBar: React.FC = () => {
           {/* 3. Privacy Masking Switch */}
           <button
             onClick={toggleMasked}
-            title={isMasked ? "Klik untuk menampilkan Nama Asli Bank" : "Klik untuk menyamarkan nama (Mode Alias)"}
+            title={isMasked ? "Nama Asli Bank" : "Mode Alias"}
             className={`flex items-center space-x-2 px-3 py-1.5 rounded-lg border text-xs font-medium transition-all ${
               isMasked
                 ? "bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200"
@@ -117,12 +103,12 @@ export const GlobalTopBar: React.FC = () => {
             {isMasked ? (
               <>
                 <EyeOff className="w-3.5 h-3.5 text-slate-500" />
-                <span>Mode Alias: <strong className="font-semibold text-slate-800">Bank A - U</strong></span>
+                <span>Mode Alias</span>
               </>
             ) : (
               <>
                 <Eye className="w-3.5 h-3.5 text-amber-600" />
-                <span>Nama Terbuka: <strong className="font-semibold text-amber-900">Nama Resmi PT</strong></span>
+                <span>Nama Resmi</span>
               </>
             )}
           </button>
@@ -138,7 +124,7 @@ export const GlobalTopBar: React.FC = () => {
               }`}
             >
               <Building2 className="w-3.5 h-3.5" />
-              <span>Internal BI (DPPK)</span>
+              <span>Internal BI</span>
             </button>
 
             <button

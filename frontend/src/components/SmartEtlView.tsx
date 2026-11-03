@@ -96,15 +96,9 @@ export const SmartEtlView: React.FC = () => {
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h2 className="text-xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
-            Smart Multi-Source ETL & Entity Resolution
-            <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
-              Pipeline Otomatis
-            </span>
+          <h2 className="text-xl font-bold text-slate-900 tracking-tight">
+            Smart ETL & Entity Resolution
           </h2>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Integrasi 5 sumber data mentah, normalisasi ticker & sandi, serta kalkulasi otomatis 9 indikator PUVA.
-          </p>
         </div>
 
         <button
@@ -115,12 +109,12 @@ export const SmartEtlView: React.FC = () => {
           {isProcessing ? (
             <>
               <RefreshCw className="w-4 h-4 animate-spin" />
-              <span>Memproses Pipeline ETL...</span>
+              <span>Memproses...</span>
             </>
           ) : (
             <>
               <Database className="w-4 h-4" />
-              <span>Jalankan Ulang Pipeline ETL (Demo)</span>
+              <span>Jalankan Pipeline ETL</span>
             </>
           )}
         </button>
@@ -163,10 +157,7 @@ export const SmartEtlView: React.FC = () => {
           >
             <div>
               <div className="flex items-center justify-between mb-2">
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
-                  {f.status}
-                </span>
-                <span className="text-[10px] font-semibold text-slate-400 font-mono">
+                <span className="text-[10px] font-semibold text-slate-500 font-mono">
                   {f.indicators}
                 </span>
               </div>
@@ -186,10 +177,7 @@ export const SmartEtlView: React.FC = () => {
         {/* Dropzone Placeholder for Live Manual Upload */}
         <div className="bg-slate-50/70 border-2 border-dashed border-slate-300 rounded-xl p-5 flex flex-col items-center justify-center text-center space-y-2 hover:bg-slate-100/70 transition-colors cursor-pointer">
           <UploadCloud className="w-8 h-8 text-slate-400" />
-          <div className="font-semibold text-xs text-slate-700">Unggah File Baru (.xlsx / .csv)</div>
-          <p className="text-[10px] text-slate-400 max-w-[200px]">
-            Tarik & lepaskan file mentah baru dari Bloomberg atau SPPA untuk pengolahan instan.
-          </p>
+          <div className="font-semibold text-xs text-slate-700">Unggah Berkas Baru (.xlsx / .csv)</div>
         </div>
       </div>
 
@@ -199,12 +187,9 @@ export const SmartEtlView: React.FC = () => {
           <div className="flex items-center space-x-2">
             <ShieldCheck className="w-4 h-4 text-emerald-600" />
             <h3 className="font-bold text-xs text-slate-800 uppercase tracking-wider">
-              Tabel Master Entity Resolution (21 Bank Dealer Utama)
+              Tabel Master Entity Resolution
             </h3>
           </div>
-          <span className="text-[11px] text-slate-500">
-            Pemetaan otomatis 3 sandi berbeda ke 1 Bank_ID tunggal
-          </span>
         </div>
 
         <div className="overflow-x-auto max-h-72">

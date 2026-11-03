@@ -32,22 +32,16 @@ export const BankWorkbooksView: React.FC = () => {
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h2 className="text-xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
+          <h2 className="text-xl font-bold text-slate-900 tracking-tight">
             Bank Workbooks & Early Warning System (EWS)
-            <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
-              21 Paket Evaluasi
-            </span>
           </h2>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Pemisahan otomatis hasil evaluasi Master BI menjadi 21 file Excel (.xlsx) mandiri per bank DU lengkap dengan sinyal EWS.
-          </p>
         </div>
 
         <div className="relative w-72">
           <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
           <input
             type="text"
-            placeholder="Cari Bank ID atau Nama..."
+            placeholder="Cari bank..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full pl-9 pr-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-emerald-500"
@@ -156,11 +150,7 @@ export const BankWorkbooksView: React.FC = () => {
               </div>
 
               {/* Card Footer Action */}
-              <div className="pt-3 border-t border-slate-100 flex items-center justify-between">
-                <span className="text-[10px] text-slate-400 font-mono">
-                  3 Sheet (.xlsx)
-                </span>
-
+              <div className="pt-3 border-t border-slate-100 flex items-center justify-end">
                 <a
                   href={`/api/export/worksheet/${item.bank_id}`}
                   download

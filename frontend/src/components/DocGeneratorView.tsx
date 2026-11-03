@@ -274,15 +274,9 @@ export const DocGeneratorView: React.FC = () => {
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h2 className="text-xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
-            Evaluation Snapshot & Automated Document Generator
-            <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
-              M.02, M.01 & 3-Lampiran Engine
-            </span>
+          <h2 className="text-xl font-bold text-slate-900 tracking-tight">
+            Snapshot & Document Generator
           </h2>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Pembekuan versi akhir evaluasi pasca-rekonsiliasi dan pembuatan otomatis naskah dinas resmi Word (.docx) & Excel (.xlsx) sesuai PBI No. 6/2024 & PADG No. 23/2024.
-          </p>
         </div>
 
         {/* Snapshot Locking Button */}
@@ -305,7 +299,7 @@ export const DocGeneratorView: React.FC = () => {
           ) : (
             <>
               <Lock className="w-4 h-4 text-emerald-400" />
-              <span>Kunci Snapshot Evaluasi ({selectedPeriod})</span>
+              <span>Kunci Snapshot ({selectedPeriod})</span>
             </>
           )}
         </button>
@@ -357,34 +351,24 @@ export const DocGeneratorView: React.FC = () => {
             <div className="flex items-center space-x-2">
               <strong className="text-sm font-bold">
                 {isLocked
-                  ? `SNAPSHOT TERKUNCI: ${snapshotStatus?.snapshot_id || "SNP-2026Q2-FINAL"}`
-                  : "DRAF EVALUASI AKTIF (UNLOCKED)"}
+                  ? `SNAPSHOT: ${snapshotStatus?.snapshot_id || "SNP-2026Q2-FINAL"}`
+                  : "DRAF EVALUASI AKTIF"}
               </strong>
-              <span
-                className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${
-                  isLocked
-                    ? "bg-amber-200 text-amber-900 border border-amber-300"
-                    : "bg-slate-200 text-slate-700"
-                }`}
-              >
-                {isLocked ? "Versi Immutable" : "Draf Kerja"}
-              </span>
             </div>
             <p className="opacity-85 text-[11px] mt-0.5 max-w-2xl">
               {isLocked
-                ? `Matriks skor dan tiket sanggahan telah dibekukan pada ${
+                ? `Data dibekukan pada ${
                     snapshotStatus?.locked_at
                       ? new Date(snapshotStatus.locked_at).toLocaleString("id-ID")
                       : "Sesi Aktif"
-                  } oleh ${snapshotStatus?.locked_by || "Tim Evaluasi DPPK"}. Seluruh dokumen M.02, M.01, dan Lampiran 1-3 dijamin 100% konsisten.`
-                : "Data evaluasi masih dapat diperbarui melalui rekonsiliasi sanggahan atau simulasi ulang threshold. Kunci snapshot sebelum menerbitkan dokumen resmi."}
+                  } oleh ${snapshotStatus?.locked_by || "Tim Evaluasi"}.`
+                : "Data evaluasi masih dalam status draf kerja."}
             </p>
           </div>
         </div>
 
         <div className="flex items-center space-x-3 text-right">
           <div className="bg-white/80 backdrop-blur-xs px-3 py-1.5 rounded-lg border border-slate-200/80 shadow-2xs">
-            <div className="text-[10px] text-slate-500 font-medium">Periode & Ambang Batas</div>
             <div className="font-bold text-slate-800">
               {selectedPeriod} • {selectedStage}
             </div>
@@ -403,10 +387,7 @@ export const DocGeneratorView: React.FC = () => {
           }`}
         >
           <FileText className="w-4 h-4 text-emerald-400" />
-          <span>Memorandum M.02 (Pimpinan DPPK)</span>
-          <span className="text-[10px] px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300">
-            .docx
-          </span>
+          <span>Memorandum M.02 (DPPK)</span>
         </button>
 
         <button
@@ -419,9 +400,6 @@ export const DocGeneratorView: React.FC = () => {
         >
           <FileText className="w-4 h-4 text-blue-400" />
           <span>Memorandum M.01 (DSMM)</span>
-          <span className="text-[10px] px-1.5 py-0.2 rounded bg-blue-500/20 text-blue-300">
-            .docx
-          </span>
         </button>
 
         <button
@@ -433,10 +411,7 @@ export const DocGeneratorView: React.FC = () => {
           }`}
         >
           <FileSpreadsheet className="w-4 h-4 text-emerald-500" />
-          <span>Paket 3 Lampiran Resmi (Sheet 1, 2, 3)</span>
-          <span className="text-[10px] px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800">
-            .xlsx
-          </span>
+          <span>Paket 3 Lampiran</span>
         </button>
       </div>
 
@@ -692,30 +667,23 @@ export const DocGeneratorView: React.FC = () => {
                   <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-slate-900 text-white">
                     M.02
                   </span>
-                  <span className="text-xs font-bold text-slate-800">Naskah Dinas Word</span>
+                  <span className="text-xs font-bold text-slate-800">Memorandum Word</span>
                 </div>
-                <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-                  Resmi Pimpinan
-                </span>
               </div>
-
-              <p className="text-xs text-slate-600 leading-relaxed">
-                Dokumen Memorandum M.02 siap diekspor ke format <strong>Microsoft Word (.docx)</strong> dengan format surat dinas resmi Bank Indonesia, lengkap dengan tabel ringkasan eksekutif, rekapitulasi 5 sanggahan, dan permohonan persetujuan pimpinan.
-              </p>
 
               <div className="space-y-2 pt-2">
                 <div className="flex items-center justify-between text-xs text-slate-500">
-                  <span>Target Audiens:</span>
+                  <span>Tujuan:</span>
                   <strong className="text-slate-800">Pimpinan DPPK</strong>
                 </div>
                 <div className="flex items-center justify-between text-xs text-slate-500">
-                  <span>Format Berkas:</span>
-                  <span className="font-mono font-medium text-slate-700">.docx (OpenXML)</span>
+                  <span>Format:</span>
+                  <span className="font-mono font-medium text-slate-700">.docx</span>
                 </div>
                 <div className="flex items-center justify-between text-xs text-slate-500">
                   <span>Mode Privasi:</span>
                   <span className="font-semibold text-slate-700">
-                    {isMasked ? "Mode Alias (Bank A - Bank U)" : "Nama Resmi Bank"}
+                    {isMasked ? "Mode Alias" : "Nama Resmi"}
                   </span>
                 </div>
               </div>
@@ -734,28 +702,6 @@ export const DocGeneratorView: React.FC = () => {
                   <span>Unduh Memorandum M.02 (.docx)</span>
                 </button>
               </div>
-            </div>
-
-            {/* Quick Summary Card */}
-            <div className="bg-slate-900 text-white rounded-2xl p-5 shadow-sm space-y-3">
-              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
-                <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                Validasi Standar PADG 23/2024
-              </h4>
-              <ul className="text-xs space-y-2 text-slate-300">
-                <li className="flex items-start gap-2">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 mt-0.5 flex-shrink-0" />
-                  <span>Kriteria kuotasi spread Repo maks 5/20 bps &amp; SRBI 20 bps terpenuhi.</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 mt-0.5 flex-shrink-0" />
-                  <span>Tenor Repo sekunder minimal 14 hari kerja diverifikasi otomatis.</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 mt-0.5 flex-shrink-0" />
-                  <span>Data snapshot beku menjamin zero-inconsistency dengan Lampiran 1-3.</span>
-                </li>
-              </ul>
             </div>
           </div>
         </div>
@@ -918,23 +864,16 @@ export const DocGeneratorView: React.FC = () => {
                   </span>
                   <span className="text-xs font-bold text-slate-800">Nota Pengantar Word</span>
                 </div>
-                <span className="text-[10px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
-                  Kepada DSMM
-                </span>
               </div>
-
-              <p className="text-xs text-slate-600 leading-relaxed">
-                Dokumen pengantar M.01 ke Departemen Surveilans & Manajemen Risiko (DSMM) berisi penyampaian klasifikasi 3 kategori kepatuhan (Lulus 100%, Pembinaan DSMM, dan Sanksi Teguran Tertulis).
-              </p>
 
               <div className="space-y-2 pt-2">
                 <div className="flex items-center justify-between text-xs text-slate-500">
-                  <span>Penerima Memo:</span>
+                  <span>Penerima:</span>
                   <strong className="text-slate-800">Kepala DSMM</strong>
                 </div>
                 <div className="flex items-center justify-between text-xs text-slate-500">
-                  <span>Format Berkas:</span>
-                  <span className="font-mono font-medium text-slate-700">.docx (OpenXML)</span>
+                  <span>Format:</span>
+                  <span className="font-mono font-medium text-slate-700">.docx</span>
                 </div>
               </div>
 
@@ -967,15 +906,9 @@ export const DocGeneratorView: React.FC = () => {
               <div className="flex items-center space-x-2">
                 <FileSpreadsheet className="w-5 h-5 text-emerald-600" />
                 <h3 className="font-bold text-sm text-slate-900">
-                  Paket Berkas 3 Lampiran Resmi (.xlsx)
+                  Paket 3 Lampiran Resmi (.xlsx)
                 </h3>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">
-                  Multi-Sheet Workbook
-                </span>
               </div>
-              <p className="text-xs text-slate-500 mt-1 max-w-2xl">
-                Buku kerja Excel (.xlsx) terintegrasi yang memuat 3 sheet resmi pelengkap Memorandum M.02 & M.01 sesuai standar pelaporan Dewan Gubernur Bank Indonesia.
-              </p>
             </div>
 
             <button
@@ -997,14 +930,6 @@ export const DocGeneratorView: React.FC = () => {
             {/* Sheet 1 */}
             <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs space-y-3 flex flex-col justify-between">
               <div>
-                <div className="flex items-center justify-between mb-2">
-                  <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-slate-900 text-white">
-                    Sheet 1
-                  </span>
-                  <span className="text-[10px] font-semibold text-slate-600 bg-slate-100 px-2 py-0.5 rounded">
-                    Realisasi Mentah
-                  </span>
-                </div>
                 <h4 className="font-bold text-sm text-slate-900">
                   Lampiran 1: Sebelum Threshold
                 </h4>
@@ -1012,22 +937,11 @@ export const DocGeneratorView: React.FC = () => {
                   Matriks 21 Bank Dealer Utama yang memuat persentase capaian pemenuhan aktual pada 9 parameter PUVA (B1 s.d. B8) tanpa pembobotan threshold.
                 </p>
               </div>
-              <div className="pt-3 border-t border-slate-100 text-[11px] text-slate-500 font-mono">
-                Kolom: B1 - B8 &amp; Rata-rata
-              </div>
             </div>
 
             {/* Sheet 2 */}
             <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs space-y-3 flex flex-col justify-between">
               <div>
-                <div className="flex items-center justify-between mb-2">
-                  <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-slate-900 text-white">
-                    Sheet 2
-                  </span>
-                  <span className="text-[10px] font-semibold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded">
-                    Terbobot &amp; Komposit
-                  </span>
-                </div>
                 <h4 className="font-bold text-sm text-slate-900">
                   Lampiran 2: Setelah Threshold
                 </h4>
@@ -1035,31 +949,17 @@ export const DocGeneratorView: React.FC = () => {
                   Matriks skor terbobot setelah ambang batas aktif ({selectedStage} State). Menampilkan Subtotal PUVA (maks 60%), OM (maks 40%), dan Skor Komposit 100%.
                 </p>
               </div>
-              <div className="pt-3 border-t border-slate-100 text-[11px] text-slate-500 font-mono">
-                Kolom: Skor B1-B8, OM1-3, Komposit
-              </div>
             </div>
 
             {/* Sheet 3 */}
             <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs space-y-3 flex flex-col justify-between">
               <div>
-                <div className="flex items-center justify-between mb-2">
-                  <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-slate-900 text-white">
-                    Sheet 3
-                  </span>
-                  <span className="text-[10px] font-semibold text-amber-800 bg-amber-100 px-2 py-0.5 rounded">
-                    Pengawasan &amp; Sanksi
-                  </span>
-                </div>
                 <h4 className="font-bold text-sm text-slate-900">
                   Lampiran 3: Tindak Lanjut Bank
                 </h4>
                 <p className="text-xs text-slate-600 mt-2 leading-relaxed">
                   Tabel komprehensif status kelulusan 21 Bank (Lulus / Email Pembinaan DSMM / Sanksi Teguran), nomor tiket Finding ID sanggahan, dan tindak lanjut hukum.
                 </p>
-              </div>
-              <div className="pt-3 border-t border-slate-100 text-[11px] text-slate-500 font-mono">
-                Kolom: Kepatuhan &amp; Rekomendasi DSMM
               </div>
             </div>
           </div>

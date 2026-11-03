@@ -133,15 +133,9 @@ export const ReconciliationView: React.FC = () => {
       {/* Header Overview */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h2 className="text-xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
-            Reconciliation Resolution Center & Gemini AI Evidence Checker
-            <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-rose-100 text-rose-800 border border-rose-300">
-              {findings.length} Antrean Temuan
-            </span>
+          <h2 className="text-xl font-bold text-slate-900 tracking-tight">
+            Reconciliation Center
           </h2>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Verifikasi dua arah antara klaim sanggahan Dealer Utama dan ketentuan PADG No. 23/2024 dengan rekomendasi AI cerdas (Human-in-the-Loop).
-          </p>
         </div>
 
         {/* Filter Status Chips */}
@@ -172,9 +166,6 @@ export const ReconciliationView: React.FC = () => {
               <Scale className="w-4 h-4 text-emerald-600" />
               Antrean Tiket Temuan ({filteredTickets.length})
             </h3>
-            <span className="text-[11px] text-slate-500 font-medium">
-              5 Bank Skenario Bermasalah
-            </span>
           </div>
 
           <div className="divide-y divide-slate-100 max-h-[680px] overflow-y-auto">
@@ -308,33 +299,27 @@ export const ReconciliationView: React.FC = () => {
               <div className="grid grid-cols-2 gap-4 text-xs">
                 <div className="p-3.5 bg-rose-50/60 rounded-xl border border-rose-200 space-y-1">
                   <span className="font-semibold text-rose-800 uppercase tracking-wider text-[10px] block">
-                    1. Rekap Data Awal BI (Gugur / Temuan)
+                    Rekap Data BI
                   </span>
                   <div className="text-sm font-black text-rose-700">
                     {selectedTicket.nilai_rekap_bi}
                   </div>
-                  <p className="text-[11px] text-rose-600/80 leading-tight">
-                    Transaksi tidak memenuhi syarat batas kuantitatif PADG No. 23/2024.
-                  </p>
                 </div>
 
                 <div className="p-3.5 bg-emerald-50/70 rounded-xl border border-emerald-200 space-y-1">
                   <span className="font-semibold text-emerald-800 uppercase tracking-wider text-[10px] block">
-                    2. Klaim Angka Sanggahan Bank
+                    Klaim Bank
                   </span>
                   <div className="text-sm font-black text-emerald-800">
                     {selectedTicket.nilai_klaim_bank || "[Belum diisi bank]"}
                   </div>
-                  <p className="text-[11px] text-emerald-600/80 leading-tight">
-                    Klaim mandiri yang diajukan bank dengan melampirkan berkas bukti.
-                  </p>
                 </div>
               </div>
 
               {/* Uraian Alasan Sanggahan */}
               <div className="space-y-1.5 text-xs">
                 <span className="font-bold text-slate-800 block">
-                  Uraian Alasan Sanggahan Resmi Bank:
+                  Uraian Alasan Sanggahan:
                 </span>
                 <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 text-slate-700 leading-relaxed font-sans italic">
                   "{selectedTicket.alasan_sanggahan || "Tidak ada rincian uraian alasan tertulis."}"
@@ -345,7 +330,7 @@ export const ReconciliationView: React.FC = () => {
               <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 text-xs space-y-2">
                 <span className="font-bold text-slate-800 flex items-center gap-1.5">
                   <Paperclip className="w-4 h-4 text-emerald-600" />
-                  Berkas Bukti Konfirmasi Terlampir:
+                  Berkas Bukti:
                 </span>
                 <div className="flex items-center justify-between bg-white p-3 rounded-lg border border-slate-200 shadow-2xs">
                   <div className="flex items-center space-x-2.5 overflow-hidden">
@@ -356,9 +341,6 @@ export const ReconciliationView: React.FC = () => {
                       <strong className="text-slate-900 font-mono text-xs block truncate" title={selectedTicket.file_bukti_name || "Bukti_Konfirmasi.pdf"}>
                         {selectedTicket.file_bukti_name || "Bukti_Konfirmasi.pdf"}
                       </strong>
-                      <span className="text-[10px] text-slate-400">
-                        Dokumen Resmi Bertandatangan & Stempel Digital
-                      </span>
                     </div>
                   </div>
 
@@ -382,11 +364,8 @@ export const ReconciliationView: React.FC = () => {
                   </div>
                   <div>
                     <h4 className="font-bold text-sm tracking-wide text-white">
-                      Asisten Verifikasi Regulasi AI (Gemini 2.5 Flash)
+                      Verifikasi AI (Gemini)
                     </h4>
-                    <span className="text-[10px] text-slate-400">
-                      Pemeriksaan Kepatuhan Aturan Mutlak PADG No. 23/2024
-                    </span>
                   </div>
                 </div>
 
@@ -397,7 +376,7 @@ export const ReconciliationView: React.FC = () => {
                   className="flex items-center space-x-1.5 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold shadow-xs transition-colors disabled:opacity-50"
                 >
                   <RefreshCw className={`w-3.5 h-3.5 ${isAnalyzingAi ? "animate-spin" : ""}`} />
-                  <span>{isAnalyzingAi ? "Menganalisis Bukti..." : "Jalankan Analisis AI"}</span>
+                  <span>{isAnalyzingAi ? "Menganalisis..." : "Jalankan Analisis AI"}</span>
                 </button>
               </div>
 
@@ -413,7 +392,7 @@ export const ReconciliationView: React.FC = () => {
                       : "bg-amber-500/20 text-amber-300 border border-amber-500/40"
                   }`}
                 >
-                  {selectedTicket.ai_recommendation_status || "Tekan 'Jalankan Analisis AI'"}
+                  {selectedTicket.ai_recommendation_status || "Belum Dianalisis"}
                 </span>
               </div>
 
@@ -423,45 +402,38 @@ export const ReconciliationView: React.FC = () => {
                   <p className="whitespace-pre-line">{selectedTicket.ai_analysis_text}</p>
                 ) : (
                   <p className="text-slate-400 italic">
-                    Belum ada hasil analisis. Klik tombol <strong>"Jalankan Analisis AI"</strong> di atas untuk memverifikasi bukti terhadap batas regulasi PADG.
+                    Belum ada hasil analisis.
                   </p>
                 )}
               </div>
             </div>
 
-            {/* Card 3: Kontrol Keputusan Human-in-the-Loop Petugas BI */}
+            {/* Card 3: Kontrol Keputusan Petugas BI */}
             <div className="bg-white rounded-xl border border-slate-200 shadow-xs p-6 space-y-4">
               <div className="flex items-center justify-between pb-3 border-b border-slate-200">
                 <div className="flex items-center space-x-2">
                   <UserCheck className="w-5 h-5 text-emerald-600" />
                   <h4 className="font-bold text-sm text-slate-900">
-                    Keputusan Final Petugas BI (Human-in-the-Loop)
+                    Keputusan Petugas
                   </h4>
                 </div>
-                <span className="text-[11px] text-slate-500">
-                  Otoritas Verifikator DPPK
-                </span>
               </div>
 
               <div className="space-y-3 text-xs">
                 <div>
                   <label className="font-semibold text-slate-700 block mb-1">
-                    Catatan Keputusan Petugas (Opsional):
+                    Catatan Keputusan:
                   </label>
                   <textarea
                     rows={2}
-                    placeholder="Masukkan pertimbangan keputusan final atau rujukan disposisi Pimpinan DPPK..."
+                    placeholder="Masukkan pertimbangan keputusan final..."
                     value={decisionNotes}
                     onChange={(e) => setDecisionNotes(e.target.value)}
                     className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-500"
                   />
                 </div>
 
-                <div className="pt-2 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100">
-                  <span className="text-[11px] text-slate-500">
-                    Persetujuan akan memperbarui matriks skor bank dan status industri secara instan.
-                  </span>
-
+                <div className="pt-2 flex flex-wrap items-center justify-end gap-3 border-t border-slate-100">
                   <div className="flex items-center space-x-2">
                     <button
                       onClick={() => handleExecuteDecision("REJECTED")}
@@ -469,7 +441,7 @@ export const ReconciliationView: React.FC = () => {
                       className="flex items-center space-x-1.5 px-4 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-300 rounded-lg text-xs font-bold transition-colors disabled:opacity-50"
                     >
                       <X className="w-4 h-4" />
-                      <span>Tolak Sanggahan (Reject)</span>
+                      <span>Tolak</span>
                     </button>
 
                     <button
@@ -478,7 +450,7 @@ export const ReconciliationView: React.FC = () => {
                       className="flex items-center space-x-1.5 px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold shadow-xs transition-colors disabled:opacity-50"
                     >
                       <Check className="w-4 h-4" />
-                      <span>Setujui Koreksi (Approve)</span>
+                      <span>Setujui</span>
                     </button>
                   </div>
                 </div>

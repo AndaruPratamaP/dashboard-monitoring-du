@@ -106,18 +106,18 @@ export const DrillDownDrawer: React.FC = () => {
                 </div>
                 <div>
                   <div className="font-bold text-sm">
-                    {drillDown.isPassed ? "MEMENUHI AMBANG BATAS (LOLOS)" : "DI BAWAH AMBANG BATAS (GUGUR / TEMUAN)"}
+                    {drillDown.isPassed ? "Lolos Threshold" : "Di Bawah Threshold"}
                   </div>
                   <div className="text-xs opacity-80 mt-0.5">
                     {drillDown.isPassed
-                      ? `Capaian ${drillDown.rawRate}% melampaui batas minimal tahap ${drillDown.stage} (>= ${drillDown.threshold}%)`
-                      : `Capaian ${drillDown.rawRate}% di bawah batas minimal tahap ${drillDown.stage} (>= ${drillDown.threshold}%)`}
+                      ? `Capaian ${drillDown.rawRate}% (Min. ${drillDown.threshold}%)`
+                      : `Capaian ${drillDown.rawRate}% (Min. ${drillDown.threshold}%)`}
                   </div>
                 </div>
               </div>
 
               <div className="text-right">
-                <div className="text-xs font-semibold uppercase tracking-wider opacity-70">Skor Diperoleh</div>
+                <div className="text-xs font-semibold uppercase tracking-wider opacity-70">Skor</div>
                 <div className="text-xl font-extrabold">
                   {drillDown.score.toFixed(2)}% <span className="text-xs font-normal opacity-70">/ {drillDown.weight.toFixed(1)}%</span>
                 </div>
@@ -128,32 +128,29 @@ export const DrillDownDrawer: React.FC = () => {
             <div className="grid grid-cols-3 gap-3">
               <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200/90 text-center">
                 <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block mb-1">
-                  Realisasi Mentah
+                  Realisasi
                 </span>
                 <span className="text-2xl font-black text-slate-900">
                   {drillDown.rawRate}%
                 </span>
-                <span className="text-[10px] text-slate-400 block mt-0.5">sebelum bobot</span>
               </div>
 
               <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200/90 text-center">
                 <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block mb-1">
-                  Batas Threshold
+                  Threshold
                 </span>
                 <span className="text-2xl font-black text-slate-900">
                   {drillDown.threshold}%
                 </span>
-                <span className="text-[10px] text-slate-400 block mt-0.5">{drillDown.stage}</span>
               </div>
 
               <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200/90 text-center">
                 <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider block mb-1">
-                  Bobot Indikator
+                  Bobot
                 </span>
                 <span className="text-2xl font-black text-emerald-700">
                   {drillDown.weight}%
                 </span>
-                <span className="text-[10px] text-slate-400 block mt-0.5">maksimal PUVA</span>
               </div>
             </div>
 
@@ -161,7 +158,7 @@ export const DrillDownDrawer: React.FC = () => {
             <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 text-xs text-slate-700 space-y-1.5">
               <div className="flex items-center space-x-1.5 text-slate-900 font-semibold">
                 <BookOpen className="w-4 h-4 text-emerald-600" />
-                <span>Rujukan Regulasi (PADG No. 23/2024 & PBI No. 6/2024)</span>
+                <span>Ketentuan Regulasi</span>
               </div>
               <p className="text-slate-600 leading-relaxed">
                 {drillDown.paramDetail}
@@ -239,13 +236,8 @@ export const DrillDownDrawer: React.FC = () => {
               <div className="flex items-center justify-between">
                 <h4 className="font-semibold text-xs text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
                   <TrendingDown className="w-4 h-4 text-rose-600" />
-                  Daftar Transaksi / Kuotasi Gugur ({failedItems.length})
+                  Daftar Transaksi Gugur ({failedItems.length})
                 </h4>
-                {failedItems.length > 0 && (
-                  <span className="text-[11px] font-medium text-rose-600 bg-rose-50 px-2 py-0.5 rounded border border-rose-200">
-                    Tidak memenuhi kriteria PADG No. 23/2024
-                  </span>
-                )}
               </div>
 
               {failedItems.length > 0 ? (
@@ -315,9 +307,6 @@ export const DrillDownDrawer: React.FC = () => {
                 <div className="p-5 text-center bg-slate-50 rounded-xl border border-slate-200 text-xs text-slate-500 flex flex-col items-center">
                   <CheckCircle className="w-6 h-6 text-emerald-600 mb-1" />
                   <span className="font-semibold text-slate-700">Tidak Ada Transaksi Gugur</span>
-                  <span className="text-[11px] text-slate-400 mt-0.5">
-                    Seluruh kuotasi dan transaksi bank memenuhi kriteria validasi PADG No. 23/2024.
-                  </span>
                 </div>
               )}
             </div>

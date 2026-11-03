@@ -131,15 +131,10 @@ export const BankPortalView: React.FC = () => {
               </span>
               <span>·</span>
               <span>{bankData.kelompok_kbmi}</span>
-              <span>·</span>
-              <span className="text-emerald-400 font-semibold">Portal Mandiri Dealer Utama</span>
             </div>
             <h2 className="text-xl font-extrabold text-white mt-1">
               {displayName}
             </h2>
-            <p className="text-xs text-slate-400">
-              Akses Terisolasi Khusus Dealer Utama · Data Bank Lain Tidak Dapat Dilihat (Privacy Protected)
-            </p>
           </div>
         </div>
 
@@ -150,7 +145,7 @@ export const BankPortalView: React.FC = () => {
             className="flex items-center space-x-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold shadow-md transition-all"
           >
             <FileSpreadsheet className="w-4 h-4" />
-            <span>Unduh Worksheet Rekap Bank (.xlsx)</span>
+            <span>Unduh Lembar Kerja (.xlsx)</span>
           </a>
         </div>
       </div>
@@ -166,16 +161,14 @@ export const BankPortalView: React.FC = () => {
               <div>
                 <div className="flex items-center space-x-2">
                   <h3 className="font-extrabold text-sm text-rose-950 tracking-tight">
-                    PERINGATAN DINI: EARLY WARNING SYSTEM (EWS) AKTIF
+                    Early Warning System (EWS)
                   </h3>
                   <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-200 text-rose-900 font-mono">
                     {failedParams.length} Parameter Di Bawah Threshold
                   </span>
                 </div>
                 <p className="text-xs text-rose-800 mt-0.5">
-                  Bank Anda terdeteksi belum memenuhi kewajiban kuartalan pada indikator:{" "}
-                  <strong>{failedParams.join(", ")}</strong> terhadap ambang batas tahap{" "}
-                  <strong>{selectedStage}</strong> (PADG No. 23/2024). Segera ajukan sanggahan atau penuhi kuota transaksi sebelum penutupan periode!
+                  Indikator di bawah threshold: <strong>{failedParams.join(", ")}</strong> ({selectedStage}).
                 </p>
               </div>
             </div>
@@ -187,7 +180,7 @@ export const BankPortalView: React.FC = () => {
               className="flex items-center space-x-1.5 px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold shadow-xs transition-colors disabled:opacity-50"
             >
               <Mail className="w-4 h-4" />
-              <span>{isSendingEws ? "Mengirimkan Notifikasi..." : "Kirim Pengingat Email Otomatis"}</span>
+              <span>{isSendingEws ? "Mengirimkan Notifikasi..." : "Kirim Pengingat Email"}</span>
             </button>
           </div>
 
@@ -212,26 +205,23 @@ export const BankPortalView: React.FC = () => {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
           <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block">
-            Status Kepatuhan Triwulan
+            Status Kepatuhan
           </span>
           <div className="mt-1 flex items-center space-x-2">
             {isAllPass ? (
               <>
                 <ShieldCheck className="w-6 h-6 text-emerald-600" />
-                <span className="text-lg font-bold text-emerald-700">MEMENUHI SELURUH ATURAN</span>
+                <span className="text-lg font-bold text-emerald-700">MEMENUHI</span>
               </>
             ) : (
               <>
                 <AlertTriangle className="w-6 h-6 text-rose-600" />
                 <span className="text-lg font-bold text-rose-700">
-                  {bankData.compliance_status === "PEMBINAAN_DSMM" ? "PERLU PEMBINAAN DSMM" : "SANKSI TEGURAN TERTULIS"}
+                  {bankData.compliance_status === "PEMBINAAN_DSMM" ? "PEMBINAAN DSMM" : "SANKSI TEGURAN"}
                 </span>
               </>
             )}
           </div>
-          <span className="text-xs text-slate-500 mt-1 block">
-            Berdasarkan ambang batas tahap <strong>{selectedStage}</strong> (PADG No. 23/2024).
-          </span>
         </div>
 
         <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
@@ -312,14 +302,11 @@ export const BankPortalView: React.FC = () => {
         <div className="flex items-center justify-between pb-3 border-b border-slate-200">
           <div>
             <h3 className="font-bold text-sm text-slate-900 flex items-center gap-2">
-              <span>Paket Konfirmasi & Formulir Pengajuan Sanggahan</span>
+              <span>Paket Konfirmasi & Sanggahan</span>
               <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">
                 {bankFindings.length} Tiket
               </span>
             </h3>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Dealer Utama berhak mengajukan klarifikasi data dan melampirkan berkas bukti sah sebelum batas akhir evaluasi.
-            </p>
           </div>
         </div>
 

@@ -145,24 +145,9 @@ export const ExecutiveMatrixView: React.FC = () => {
       {/* 1. Header Overview */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h2 className="text-xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
-            Executive Matrix Kepatuhan DU PUVA
-            <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
-              PADG No. 23/2024
-            </span>
+          <h2 className="text-xl font-bold text-slate-900 tracking-tight">
+            Executive Matrix
           </h2>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Monitoring Pemenuhan 9 Indikator Pasar Uang & Valas 21 Dealer Utama Bank Indonesia Triwulan II 2026.
-          </p>
-        </div>
-
-        <div className="flex items-center space-x-2 text-xs">
-          <span className="px-3 py-1.5 bg-white border border-slate-200 rounded-lg shadow-2xs font-medium text-slate-600">
-            Ambang Batas Aktif: <strong className="text-emerald-700">{selectedStage} STATE</strong>
-          </span>
-          <span className="px-3 py-1.5 bg-slate-100 border border-slate-200 rounded-lg text-slate-500 font-mono">
-            {matrix.length} Records
-          </span>
         </div>
       </div>
 
@@ -175,11 +160,6 @@ export const ExecutiveMatrixView: React.FC = () => {
               Total Dealer Utama
             </span>
             <div className="text-2xl font-black text-slate-900 mt-1">21 Bank</div>
-            <div className="text-[11px] text-slate-500 mt-1.5 flex items-center space-x-1">
-              <span className="font-semibold text-slate-700">4</span> KBMI 4 ·{" "}
-              <span className="font-semibold text-slate-700">10</span> KBMI 3 ·{" "}
-              <span className="font-semibold text-slate-700">7</span> KBMI 2
-            </div>
           </div>
           <div className="p-2.5 bg-slate-100 text-slate-600 rounded-xl">
             <Building2 className="w-5 h-5" />
@@ -190,14 +170,10 @@ export const ExecutiveMatrixView: React.FC = () => {
         <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs flex items-start justify-between">
           <div>
             <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block">
-              Lolos Seluruh Threshold
+              Lolos Threshold
             </span>
             <div className="text-2xl font-black text-emerald-600 mt-1">
               {fullCompliance} Bank
-            </div>
-            <div className="text-[11px] text-emerald-700 mt-1.5 flex items-center space-x-1 font-medium">
-              <CheckCircle className="w-3.5 h-3.5" />
-              <span>Capaian PUVA Penuh (60/60 Poin)</span>
             </div>
           </div>
           <div className="p-2.5 bg-emerald-50 text-emerald-600 rounded-xl border border-emerald-200">
@@ -209,14 +185,10 @@ export const ExecutiveMatrixView: React.FC = () => {
         <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs flex items-start justify-between">
           <div>
             <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block">
-              Perlu Klarifikasi / Temuan
+              Perlu Klarifikasi
             </span>
             <div className="text-2xl font-black text-rose-600 mt-1">
               {attentionCount} Bank
-            </div>
-            <div className="text-[11px] text-slate-500 mt-1.5">
-              <span className="text-amber-600 font-semibold">4</span> Pembinaan DSMM ·{" "}
-              <span className="text-rose-600 font-semibold">1</span> Teguran Tertulis
             </div>
           </div>
           <div className="p-2.5 bg-rose-50 text-rose-600 rounded-xl border border-rose-200">
@@ -228,14 +200,11 @@ export const ExecutiveMatrixView: React.FC = () => {
         <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs flex items-start justify-between">
           <div>
             <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block">
-              Rerata & Median Skor PUVA
+              Rerata Skor PUVA
             </span>
             <div className="text-2xl font-black text-slate-900 mt-1 flex items-baseline gap-1.5">
               <span>{averagePuva}%</span>
               <span className="text-xs font-normal text-slate-400">/ 60%</span>
-            </div>
-            <div className="text-[11px] text-slate-500 mt-1.5">
-              Nilai Median: <strong className="text-slate-700">{medianPuva}%</strong> (Maks. 60%)
             </div>
           </div>
           <div className="p-2.5 bg-blue-50 text-blue-600 rounded-xl border border-blue-200">
@@ -245,14 +214,14 @@ export const ExecutiveMatrixView: React.FC = () => {
       </div>
 
       {/* 3. Filter & Search Toolbar */}
-      <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-3">
+      <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-3 flex-1 min-w-[280px]">
           {/* Search Input */}
           <div className="relative flex-1 max-w-sm">
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               type="text"
-              placeholder="Cari Bank ID, Alias (Bank A), atau Nama Bank..."
+              placeholder="Cari bank..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full pl-9 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-emerald-500 focus:bg-white transition-all"
@@ -267,10 +236,10 @@ export const ExecutiveMatrixView: React.FC = () => {
               onChange={(e) => setSelectedKbmi(e.target.value)}
               className="bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-medium text-slate-700 focus:outline-none cursor-pointer"
             >
-              <option value="ALL">Semua KBMI (21)</option>
-              <option value="KBMI 4">KBMI 4 (4 Bank)</option>
-              <option value="KBMI 3">KBMI 3 (10 Bank)</option>
-              <option value="KBMI 2">KBMI 2 (7 Bank)</option>
+              <option value="ALL">Semua KBMI</option>
+              <option value="KBMI 4">KBMI 4</option>
+              <option value="KBMI 3">KBMI 3</option>
+              <option value="KBMI 2">KBMI 2</option>
             </select>
           </div>
 
@@ -283,22 +252,10 @@ export const ExecutiveMatrixView: React.FC = () => {
               className="bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-medium text-slate-700 focus:outline-none cursor-pointer"
             >
               <option value="ALL">Semua Status</option>
-              <option value="MEMENUHI">Lolos Penuh (100%)</option>
-              <option value="PEMBINAAN_DSMM">Pembinaan DSMM (90-99%)</option>
-              <option value="SANKSI_TEGURAN">Sanksi Teguran (&lt;90%)</option>
+              <option value="MEMENUHI">Memenuhi (100%)</option>
+              <option value="PEMBINAAN_DSMM">Pembinaan DSMM</option>
+              <option value="SANKSI_TEGURAN">Sanksi Teguran</option>
             </select>
-          </div>
-        </div>
-
-        {/* Legend / Guidance Tip */}
-        <div className="flex items-center space-x-3 text-xs text-slate-500">
-          <div className="flex items-center space-x-1.5">
-            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
-            <span className="text-[11px]">Memenuhi Threshold</span>
-          </div>
-          <div className="flex items-center space-x-1.5">
-            <span className="w-2.5 h-2.5 rounded-full bg-rose-500" />
-            <span className="text-[11px]">Di Bawah Threshold (Klik Sel)</span>
           </div>
         </div>
       </div>
@@ -443,7 +400,6 @@ export const ExecutiveMatrixView: React.FC = () => {
                       <div className="font-extrabold text-xs text-slate-900 font-mono">
                         {item.composite_score.toFixed(1)}%
                       </div>
-                      <span className="text-[9px] text-slate-400">OM: +40%</span>
                     </td>
 
                     {/* Status & Tindak Lanjut BI */}
@@ -491,16 +447,10 @@ export const ExecutiveMatrixView: React.FC = () => {
           </table>
         </div>
 
-        {/* Table Footer Instructions */}
-        <div className="p-3 bg-slate-50 border-t border-slate-200 flex flex-wrap items-center justify-between text-[11px] text-slate-500">
-          <div className="flex items-center space-x-1.5">
-            <Info className="w-3.5 h-3.5 text-emerald-600" />
-            <span>
-              <strong>Tip Interaktif:</strong> Klik pada sel persentase mana pun (misal: <strong>76.7%</strong> pada Bank A atau <strong>72.2%</strong> pada Bank R) untuk membuka Drawer rincian data transaksi harian yang gugur.
-            </span>
-          </div>
+        {/* Table Footer */}
+        <div className="p-3 bg-slate-50 border-t border-slate-200 flex items-center justify-between text-[11px] text-slate-500">
           <div>
-            Menampilkan {filteredMatrix.length} dari 21 Bank Dealer Utama
+            Total: {filteredMatrix.length} Bank Dealer Utama
           </div>
         </div>
       </div>
