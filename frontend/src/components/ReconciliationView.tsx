@@ -72,6 +72,10 @@ export const ReconciliationView: React.FC = () => {
 
   // 1. Eksekusi Analisis AI (Gemini Evidence Checker)
   const handleRunAiAnalysis = async (findingId: string) => {
+    if (!findingId) {
+      alert("Pilih tiket temuan terlebih dahulu.")
+      return
+    }
     setIsAnalyzingAi(true)
     setDecisionFeedback(null)
     try {
@@ -84,10 +88,13 @@ export const ReconciliationView: React.FC = () => {
         await refreshData()
         await loadAuditLogs()
       } else {
-        alert("Gagal menjalankan analisis AI.")
+        const errJson = await res.json().catch(() => null)
+        const errMsg = errJson?.detail || "Gagal menjalankan analisis AI. Silakan coba beberapa saat lagi."
+        alert(errMsg)
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("Error AI Analysis:", err)
+      alert("Koneksi ke backend terputus atau timeout. Pastikan server backend berjalan di port 8000.")
     } finally {
       setIsAnalyzingAi(false)
     }
