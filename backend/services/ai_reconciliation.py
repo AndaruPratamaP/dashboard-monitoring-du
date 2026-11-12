@@ -1,6 +1,6 @@
 """
 AI Evidence Checker Service untuk Rekonsiliasi DU PUVA
-Menggunakan google-genai (Gemini 2.5 Flash) dan Fallback Deterministic Rule Analyzer
+Menggunakan Gemini API (REST) dan Fallback Deterministic Rule Analyzer
 berdasarkan ketentuan mutlak PADG No. 23 Tahun 2024 & PBI No. 6 Tahun 2024.
 """
 
@@ -8,7 +8,10 @@ import os
 import json
 import logging
 from typing import Dict, Any, Optional
+import re
 import requests
+
+from services.rule_engine import THRESHOLDS, canonical_code, parse_claim_percent
 
 logger = logging.getLogger("ai_reconciliation")
 
@@ -41,6 +44,9 @@ Pedoman Analisis:
 """
 
 
+VALID_STATUSES = {"RECOMMEND_APPROVE", "RECOMMEND_REJECT", "PARTIAL_REVIEW"}
+
+
 def run_deterministic_analyzer(
     finding_id: str,
     bank_alias: str,
@@ -53,77 +59,91 @@ def run_deterministic_analyzer(
     stage: str = "EARLY",
 ) -> Dict[str, Any]:
     """
-    Fallback Deterministic Rule Analyzer yang tajam dan akurat
-    sesuai parameter regulasi PADG No. 23/2024.
+    Fallback Deterministic Rule Analyzer.
+
+    Hanya menilai hal yang dapat diverifikasi secara mekanis dari data yang tersedia
+    (angka klaim vs threshold, aturan tenor mutlak, kelengkapan berkas). Analyzer ini
+    TIDAK membaca isi dokumen bukti, sehingga tidak pernah merekomendasikan APPROVE:
+    sanggahan yang lolos pemeriksaan mekanis diteruskan sebagai PARTIAL_REVIEW untuk
+    diverifikasi petugas BI.
     """
-    p_code = parameter_code.upper().strip()
-    reason_lower = (alasan_sanggahan or "").lower()
-    claim_lower = (klaim_bank or "").lower()
-    file_lower = (file_bukti_name or "").lower()
+    p_code = canonical_code(parameter_code)
+    st = stage.upper() if stage.upper() in THRESHOLDS else "EARLY"
+    threshold = THRESHOLDS[st].get(p_code, 80.0)
+    reason = alasan_sanggahan or ""
+    claimed = parse_claim_percent(klaim_bank)
+    details = failed_details or []
 
-    # Skenario 1: B2 (Kuotasi SRBI - Bank A)
-    if "B2" in p_code:
-        if "18 bps" in reason_lower or "18" in reason_lower or "terminal" in file_lower:
-            return {
-                "recommendation_status": "RECOMMEND_APPROVE",
-                "confidence_score": 0.96,
-                "regulatory_reference": "PADG No. 23/2024 Pasal 7 ayat (2)",
-                "analysis_text": f"RECOMMEND_APPROVE: Tangkapan layar terminal kuotasi {bank_alias} membuktikan kuotasi seri SRBI-12M-2026A telah dipasang dengan spread 18.0 bps pada 5 hari kerja yang disanggahkan. Angka ini memenuhi batas maksimal 20 bps sesuai PADG No. 23/2024. Penyesuaian data menaikkan hari valid menjadi 51/60 (85.00%), melampaui ambang batas {stage} (>= 80%).",
-                "suggested_action": "Setujui koreksi dan perbarui matriks capaian bank menjadi 85.00% (Lolos B2).",
-            }
+    def result(status: str, confidence: float, ref: str, text: str, action: str) -> Dict[str, Any]:
+        return {
+            "recommendation_status": status,
+            "confidence_score": confidence,
+            "regulatory_reference": ref,
+            "analysis_text": f"{status}: {text}",
+            "suggested_action": action,
+        }
 
-    # Skenario 2: B3 (Kuotasi OIS - Bank B)
-    if "B3" in p_code:
-        if "helpdesk" in reason_lower or "feeder" in reason_lower or "tiket" in file_lower:
-            return {
-                "recommendation_status": "PARTIAL_REVIEW",
-                "confidence_score": 0.88,
-                "regulatory_reference": "PADG No. 23/2024 Pasal 8 ayat (1) & (3)",
-                "analysis_text": f"PARTIAL_REVIEW: Log tiket helpdesk Bloomberg menunjukkan kendala teknis mapping ticker tenor 3M pada feeder otomatis {bank_alias}. Namun, PADG No. 23/2024 mewajibkan kuotasi tayang secara aktif di platform pasar. Diperlukan diskresi kebijakan Pimpinan DPPK apakah kendala teknis feeder dapat diakomodasi sebagai pemenuhan kewajiban kuotasi.",
-                "suggested_action": "Eskalasi ke Pimpinan DPPK untuk penetapan diskresi kebijakan.",
-            }
+    # 1. Tidak ada uraian sanggahan maupun berkas bukti
+    if not reason.strip() and not file_bukti_name:
+        return result(
+            "RECOMMEND_REJECT", 0.90, "PADG No. 23/2024 Ketentuan Umum",
+            f"{bank_alias} belum menyampaikan alasan sanggahan maupun berkas bukti untuk parameter {p_code}.",
+            "Tolak sanggahan atau minta bank melengkapi alasan dan bukti.",
+        )
 
-    # Skenario 3: B6 (Penjualan SRBI Sekunder - Bank D)
-    if "B6" in p_code:
-        if "120" in reason_lower or "settled" in reason_lower or "hartis" in file_lower:
-            return {
-                "recommendation_status": "RECOMMEND_APPROVE",
-                "confidence_score": 0.98,
-                "regulatory_reference": "PADG No. 23/2024 Pasal 11 ayat (1)",
-                "analysis_text": f"RECOMMEND_APPROVE: Bukti settlement konfirmasi akhir hari HARTIS tanggal 30 Juni 2026 memvalidasi transaksi penjualan SRBI sekunder tambahan sebesar Rp 120 Miliar. Total penjualan menjadi Rp 315 Miliar (31.50% dari volume win perdana), melampaui kewajiban minimal 30% sesuai PADG No. 23/2024.",
-                "suggested_action": "Setujui sanggahan dan perbarui rasio pemenuhan B6 menjadi 100.00% (Lolos B6).",
-            }
+    # 2. Aturan tenor mutlak B7a: transaksi repo < 14 hari tidak dapat diakui.
+    #    Jika selisih hari klaim bank vs rekap BI tidak melebihi jumlah tanggal transaksi
+    #    bertenor < 14 hari yang dikeluarkan BI, sanggahan bergantung pada transaksi tsb.
+    if p_code == "B7a":
+        short_deals = [t for t in details if isinstance(t, dict) and (t.get("tenor_hari") or 99) < 14]
+        short_dates = {t.get("tanggal") for t in short_deals}
+        claim_days = re.search(r"(\d+)\s*/\s*(\d+)", klaim_bank or "")
+        bi_days_m = re.search(r"(\d+)\s*/\s*\d+", rekap_bi or "")
+        bi_pct = re.search(r"(\d+(?:\.\d+)?)\s*%", rekap_bi or "")
+        bi_days = None
+        if bi_days_m:
+            bi_days = int(bi_days_m.group(1))
+        elif bi_pct and claim_days:
+            # Rekap hanya memuat persentase -> konversi ke hari memakai target hari pada klaim (mis. 72.22% x 36 = 26)
+            bi_days = round(float(bi_pct.group(1)) * int(claim_days.group(2)) / 100.0)
+        if short_dates and bi_days is not None and claim_days:
+            gap = int(claim_days.group(1)) - bi_days
+            if 0 < gap <= len(short_dates):
+                return result(
+                    "RECOMMEND_REJECT", 0.95, "PADG No. 23/2024 (tenor repo sekunder minimal 2 minggu)",
+                    f"{bank_alias} mengklaim {claim_days.group(1)} hari valid, sedangkan rekap BI {bi_days} hari. "
+                    f"Selisih {gap} hari tidak melebihi {len(short_dates)} tanggal transaksi repo bertenor < 14 hari "
+                    f"({len(short_deals)} transaksi, tenor terpendek {min(t.get('tenor_hari') for t in short_deals)} hari) "
+                    f"yang dikeluarkan dari perhitungan BI. Transaksi tersebut tidak dapat diakui.",
+                    "Tolak sanggahan dan pertahankan nilai rekap BI.",
+                )
 
-    # Skenario 4: B4 (Counterparty Line Repo - Bank N)
-    if "B4" in p_code:
-        if "gmra" in reason_lower or "ditandatangani" in reason_lower or "gmra" in file_lower:
-            return {
-                "recommendation_status": "RECOMMEND_APPROVE",
-                "confidence_score": 0.95,
-                "regulatory_reference": "PADG No. 23/2024 Pasal 9 ayat (1)",
-                "analysis_text": f"RECOMMEND_APPROVE: Perjanjian GMRA bilateral dan pembukaan counterparty line Repo terbukti ditandatangani per 28 Juni 2026 (sebelum batas cut-off triwulan). Fasilitas aktif menjadi 6 Bank DU dan 6 Bank Non-DU, menghasilkan rasio capaian 60.00% yang melampaui ambang batas tahap {stage} (>= 50%).",
-                "suggested_action": "Setujui penambahan fasilitas dan perbarui rasio capaian B4 menjadi 60.00% (Lolos B4).",
-            }
+    # 3. Angka klaim bank sendiri masih di bawah threshold aktif
+    if claimed is not None and claimed < threshold:
+        return result(
+            "RECOMMEND_REJECT", 0.90, f"PADG No. 23/2024 (threshold {st})",
+            f"Nilai klaim {bank_alias} ({claimed:.2f}%) masih di bawah ambang batas {p_code} tahap {st} "
+            f"({threshold:.1f}%). Walaupun klaim diterima seluruhnya, parameter tetap tidak terpenuhi.",
+            "Tolak sanggahan; status temuan tidak berubah meskipun klaim diterima.",
+        )
 
-    # Skenario 5: B7a (Transaksi Repo Sekunder - Bank R) -> MUTLAK REJECT KARENA TENOR 7 HARI
-    if "B7A" in p_code or "B7" in p_code:
-        if "7 hari" in reason_lower or "tenor" in reason_lower or any((t.get("tenor_hari") or 0) < 14 for t in (failed_details or [])):
-            return {
-                "recommendation_status": "RECOMMEND_REJECT",
-                "confidence_score": 0.99,
-                "regulatory_reference": "PADG No. 23/2024 Pasal 12 ayat (2) huruf b",
-                "analysis_text": f"RECOMMEND_REJECT: Sanggahan DITOLAK. Berdasarkan audit log deal HARTIS, 12 transaksi repo yang diajukan {bank_alias} hanya memiliki jangka waktu 7 hari. PADG No. 23 Tahun 2024 Pasal 12 ayat (2) huruf b secara mutlak mewajibkan tenor transaksi repo sekunder Dealer Utama paling sedikit 2 minggu (>= 14 hari). Transaksi bertenor 7 hari tidak dapat diakui, sehingga capaian bank tetap 26 hari kerja (72.22% < threshold 80%).",
-                "suggested_action": "Tolak sanggahan bank dan pertahankan status temuan sanksi teguran tertulis.",
-            }
-
-    # Default fallback analitis
-    return {
-        "recommendation_status": "PARTIAL_REVIEW",
-        "confidence_score": 0.85,
-        "regulatory_reference": "PADG No. 23/2024 Ketentuan Umum",
-        "analysis_text": f"PARTIAL_REVIEW: Klaim sanggahan {bank_alias} pada parameter {p_code} telah dicatat. Diperlukan pencocokan silang tambahan antara dokumen bukti '{file_bukti_name or 'berkas'}' dengan log server penarikan data mentah Bank Indonesia sebelum keputusan akhir dieksekusi.",
-        "suggested_action": "Lakukan verifikasi berkas oleh Petugas BI DPPK.",
-    }
+    # 4. Lolos pemeriksaan mekanis -> wajib verifikasi berkas oleh petugas
+    notes = []
+    if claimed is None:
+        notes.append("klaim bank tidak memuat angka persentase yang dapat diverifikasi")
+    else:
+        notes.append(f"klaim {claimed:.2f}% akan melampaui threshold {st} ({threshold:.1f}%) bila terbukti")
+    if not file_bukti_name:
+        notes.append("bank tidak melampirkan berkas bukti")
+    if details:
+        notes.append(f"data BI mencatat {len(details)} catatan transaksi/kuotasi tidak memenuhi syarat")
+    return result(
+        "PARTIAL_REVIEW", 0.50, "PADG No. 23/2024",
+        f"Sanggahan {bank_alias} pada parameter {p_code} (rekap BI: {rekap_bi}): " + "; ".join(notes) + ". "
+        f"Analyzer deterministik tidak membaca isi berkas '{file_bukti_name or '-'}', sehingga kebenaran klaim "
+        f"harus dicocokkan manual dengan data sumber.",
+        "Petugas BI memverifikasi isi berkas bukti terhadap data sumber sebelum memutuskan.",
+    )
 
 
 def analyze_dispute_with_ai(
@@ -156,14 +176,14 @@ Tahap Threshold Aktif: {stage}
 Data Rekap Awal BI: {rekap_bi}
 Klaim Sanggahan Bank: {klaim_bank or '[Tidak ada klaim angka spesifik]'}
 Alasan Resmi Sanggahan Bank: {alasan_sanggahan or '[Tidak ada uraian alasan]'}
-Nama Berkas Bukti: {file_bukti_name or '[Tidak melampirkan berkas bukti]'}
+Nama Berkas Bukti: {file_bukti_name or '[Tidak melampirkan berkas bukti]'} (CATATAN: isi berkas TIDAK disertakan; jangan berasumsi isi berkas membuktikan klaim)
 Rincian Catatan Transaksi Tidak Memenuhi Syarat:
 {json.dumps(failed_details or [], indent=2)}
 
 Lakukan analisis kepatuhan regulasi terhadap PADG No. 23/2024 dan berikan rekomendasi output dalam format JSON sesuai spesifikasi system prompt.
 """
 
-        headers = {"Content-Type": "application/json"}
+        headers = {"Content-Type": "application/json", "x-goog-api-key": api_key}
         payload = {
             "systemInstruction": {
                 "parts": [{"text": SYSTEM_PROMPT}]
@@ -180,7 +200,7 @@ Lakukan analisis kepatuhan regulasi terhadap PADG No. 23/2024 dan berikan rekome
         }
 
         for model in candidate_models:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
             try:
                 # Timeout ringkas 4.0 detik agar UI responsif dan tidak hang jika server Google overload (503)
                 resp = requests.post(url, json=payload, headers=headers, timeout=4.0)
@@ -192,8 +212,11 @@ Lakukan analisis kepatuhan regulasi terhadap PADG No. 23/2024 dan berikan rekome
                         if parts and "text" in parts[0]:
                             raw_text = parts[0]["text"]
                             parsed = json.loads(raw_text)
+                            rec = str(parsed.get("recommendation_status", "")).upper()
+                            if rec not in VALID_STATUSES:
+                                rec = "PARTIAL_REVIEW"
                             return {
-                                "recommendation_status": parsed.get("recommendation_status", "PARTIAL_REVIEW"),
+                                "recommendation_status": rec,
                                 "confidence_score": float(parsed.get("confidence_score", 0.90)),
                                 "regulatory_reference": parsed.get("regulatory_reference", "PADG No. 23/2024"),
                                 "analysis_text": parsed.get("analysis_text", raw_text),

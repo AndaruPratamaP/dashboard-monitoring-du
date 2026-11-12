@@ -32,6 +32,13 @@ def test_stage5_flow():
     status_data = res.json()
     assert status_data["is_locked"] is True
     assert status_data["snapshot_id"] == lock_data["snapshot_id"]
+
+    # Snapshot terkunci wajib menolak perubahan data
+    blocked = client.post("/api/evaluation/recalculate?stage=INTERMEDIATE")
+    assert blocked.status_code == 409, f"Recalculate on locked snapshot should be 409: {blocked.text}"
+    blocked_dec = client.post("/api/reconciliation/FND-2026Q2-DU18-B7A/decide", data={"decision": "REJECTED"})
+    assert blocked_dec.status_code == 409, f"Decide on locked snapshot should be 409: {blocked_dec.text}"
+    print("   Locked snapshot correctly blocks recalculate & decide (409).")
     print("   Verified snapshot is now LOCKED.")
 
     # 3. Test Preview M.02 & M.01
@@ -48,7 +55,7 @@ def test_stage5_flow():
     p01 = prev_m01.json()
     assert p01["type"] == "M.01"
     assert "categories" in p01
-    print(f"   Preview M.01 OK: {p01['title']}, lulus={len(p01['categories']['lulus'])}, pembinaan={len(p01['categories']['pembinaan'])}")
+    print(f"   Preview M.01 OK: {p01['title']}, lulus={len(p01['categories']['lulus'])}, tidak_memenuhi={len(p01['categories']['tidak_memenuhi'])}")
 
     # 4. Test Export M.02 docx
     m02_res = client.get("/api/export/memo/m02?masked=false")

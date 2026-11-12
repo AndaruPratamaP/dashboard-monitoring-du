@@ -34,8 +34,8 @@ interface SnapshotStatus {
   summary: {
     total_banks: number
     full_pass: number
-    pembinaan: number
-    sanksi: number
+    tidak_memenuhi: number
+    data_belum_lengkap: number
   }
 }
 
@@ -55,8 +55,8 @@ interface MemoPreviewData {
   summary_stats?: {
     total_banks: number
     full_pass: number
-    pembinaan: number
-    sanksi: number
+    tidak_memenuhi: number
+    data_belum_lengkap: number
   }
   findings?: Array<{
     finding_id: string
@@ -70,8 +70,8 @@ interface MemoPreviewData {
   }>
   categories?: {
     lulus: string[]
-    pembinaan: Array<{ bank_name: string; score: number; notes: string }>
-    sanksi: Array<{ bank_name: string; score: number; notes: string }>
+    tidak_memenuhi: Array<{ bank_name: string; score: number; notes: string }>
+    data_belum_lengkap: Array<{ bank_name: string; score: number; notes: string }>
   }
 }
 
@@ -479,7 +479,7 @@ export const DocGeneratorView: React.FC = () => {
                   1.1. Merujuk Peraturan Bank Indonesia (PBI) No. 6 Tahun 2024 tentang Pasar Uang dan Pasar Valuta Asing serta Peraturan Anggota Dewan Gubernur (PADG) No. 23 Tahun 2024 tentang Tata Cara Penetapan, Evaluasi, dan Kewajiban Dealer Utama Pasar Uang dan Pasar Valuta Asing (DU PUVA).
                 </p>
                 <p className="text-xs leading-relaxed text-slate-700 text-justify">
-                  1.2. Telah dilaksanakan kegiatan evaluasi triwulanan kepatuhan atas 21 (dua puluh satu) Bank Dealer Utama untuk periode <strong>{selectedPeriod}</strong> (60 hari kerja aktif) pada tahap ambang batas aktif <strong>{selectedStage} STATE</strong>.
+                  1.2. Telah dilaksanakan kegiatan evaluasi triwulanan kepatuhan atas 21 (dua puluh satu) Bank Dealer Utama untuk periode <strong>{selectedPeriod}</strong>  pada tahap ambang batas aktif <strong>{selectedStage} STATE</strong>.
                 </p>
               </div>
 
@@ -540,34 +540,28 @@ export const DocGeneratorView: React.FC = () => {
                     </thead>
                     <tbody className="divide-y divide-slate-200">
                       <tr className="hover:bg-slate-50">
-                        <td className="p-2.5 font-bold text-slate-900">Lolos Penuh Seluruh Kewajiban (100%)</td>
-                        <td className="p-2.5 text-center font-mono font-bold text-slate-600">16 Bank</td>
+                        <td className="p-2.5 font-bold text-slate-900">Memenuhi Seluruh Kewajiban PUVA (60%)</td>
+                        <td className="p-2.5 text-center font-mono font-bold text-slate-400">-</td>
                         <td className="p-2.5 text-center font-mono font-bold text-emerald-700 bg-emerald-50/50">
-                          {previewM02?.summary_stats?.full_pass || 16} Bank
+                          {previewM02?.summary_stats?.full_pass ?? 0} Bank
                         </td>
-                        <td className="p-2.5 text-emerald-700 font-medium">Dinyatakan Memenuhi Seluruh Kewajiban</td>
+                        <td className="p-2.5 text-emerald-700 font-medium">Seluruh 9 parameter lolos threshold</td>
                       </tr>
                       <tr className="hover:bg-slate-50">
-                        <td className="p-2.5 font-bold text-slate-900">Perlu Klarifikasi / Tiket Temuan</td>
-                        <td className="p-2.5 text-center font-mono font-bold text-rose-600">5 Bank</td>
-                        <td className="p-2.5 text-center font-mono font-bold text-slate-700">0 Bank (Selesai)</td>
-                        <td className="p-2.5 text-slate-600 font-medium">Verifikasi Berkas & AI Selesai Dilakukan</td>
-                      </tr>
-                      <tr className="hover:bg-slate-50">
-                        <td className="p-2.5 font-bold text-slate-900">Kategori Pembinaan DSMM (90 - &lt;100%)</td>
-                        <td className="p-2.5 text-center font-mono font-bold text-amber-600">4 Bank</td>
-                        <td className="p-2.5 text-center font-mono font-bold text-amber-700 bg-amber-50/50">
-                          {previewM02?.summary_stats?.pembinaan || 4} Bank
-                        </td>
-                        <td className="p-2.5 text-amber-800 font-medium">Email Pembinaan Pemenuhan Disiplin Kuotasi</td>
-                      </tr>
-                      <tr className="hover:bg-slate-50">
-                        <td className="p-2.5 font-bold text-slate-900">Kategori Sanksi Teguran Tertulis (&lt;90%)</td>
-                        <td className="p-2.5 text-center font-mono font-bold text-rose-600">1 Bank</td>
+                        <td className="p-2.5 font-bold text-slate-900">Tidak Memenuhi Minimal Satu Kewajiban</td>
+                        <td className="p-2.5 text-center font-mono font-bold text-slate-400">-</td>
                         <td className="p-2.5 text-center font-mono font-bold text-rose-700 bg-rose-50/50">
-                          {previewM02?.summary_stats?.sanksi || 1} Bank
+                          {previewM02?.summary_stats?.tidak_memenuhi ?? 0} Bank
                         </td>
-                        <td className="p-2.5 text-rose-700 font-bold">Surat Sanksi Administratif Teguran Tertulis</td>
+                        <td className="p-2.5 text-slate-600 font-medium">Tindak lanjut menunggu penetapan</td>
+                      </tr>
+                      <tr className="hover:bg-slate-50">
+                        <td className="p-2.5 font-bold text-slate-900">Data Evaluasi Belum Lengkap</td>
+                        <td className="p-2.5 text-center font-mono font-bold text-slate-400">-</td>
+                        <td className="p-2.5 text-center font-mono font-bold text-amber-700 bg-amber-50/50">
+                          {previewM02?.summary_stats?.data_belum_lengkap ?? 0} Bank
+                        </td>
+                        <td className="p-2.5 text-amber-800 font-medium">Sumber data belum seluruhnya diunggah</td>
                       </tr>
                     </tbody>
                   </table>
@@ -762,7 +756,7 @@ export const DocGeneratorView: React.FC = () => {
                   1. Dasar Hukum dan Maksud Penyampaian
                 </h3>
                 <p className="text-xs leading-relaxed text-slate-700 text-justify font-sans">
-                  Menindaklanjuti ketentuan Pasal 28 PADG No. 23 Tahun 2024, Departemen Pengembangan Pasar Keuangan (DPPK) menyampaikan hasil akhir evaluasi 21 Bank Dealer Utama PUVA periode {selectedPeriod} pasca-rekonsiliasi kepada DSMM sebagai rujukan resmi pelaksanaan pembinaan dan sanksi administratif pengawasan perbankan.
+                  Menindaklanjuti ketentuan Pasal 28 PADG No. 23 Tahun 2024, Departemen Pengembangan Pasar Keuangan (DPPK) menyampaikan hasil akhir evaluasi 21 Bank Dealer Utama PUVA periode {selectedPeriod} pasca-rekonsiliasi kepada DSMM. Skor yang dievaluasi adalah komponen PUVA (maks 60%); pemetaan ke tindak lanjut pembinaan / teguran tertulis menunggu penetapan aturan skor tanpa komponen Operasi Moneter.
                 </p>
               </div>
 
@@ -770,7 +764,7 @@ export const DocGeneratorView: React.FC = () => {
               <div className="space-y-3 font-sans">
                 <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wide flex items-center gap-1.5">
                   <span className="w-1.5 h-3.5 bg-blue-600 rounded-xs"></span>
-                  2. Klasifikasi Hasil Evaluasi Komposit &amp; Rekomendasi Tindak Lanjut
+                  2. Klasifikasi Hasil Evaluasi PUVA
                 </h3>
 
                 {/* Kategori A: Memenuhi (100%) */}
@@ -778,36 +772,31 @@ export const DocGeneratorView: React.FC = () => {
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-bold text-emerald-900 flex items-center gap-1.5">
                       <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                      Kategori A: Memenuhi Seluruh Kewajiban (Skor Komposit = 100%)
+                      Kategori A: Memenuhi Seluruh Kewajiban PUVA (Skor 60%)
                     </span>
                     <span className="text-[11px] font-bold px-2 py-0.5 rounded bg-emerald-200 text-emerald-900">
-                      {previewM01?.categories?.lulus?.length || 16} Bank Lulus
+                      {previewM01?.categories?.lulus?.length ?? 0} Bank
                     </span>
                   </div>
-                  <p className="text-[11px] text-emerald-800">
-                    <strong>Rekomendasi DSMM:</strong> Dinyatakan Lulus penuh evaluasi triwulanan Dealer Utama PUVA.
-                  </p>
                   <p className="text-[11px] text-slate-600">
-                    Daftar Bank: {previewM01?.categories?.lulus?.slice(0, 8).join(", ")}... dan bank lainnya.
+                    Daftar Bank: {previewM01?.categories?.lulus?.length ? previewM01.categories.lulus.join(", ") : "Nihil"}
                   </p>
                 </div>
 
-                {/* Kategori B: Pembinaan DSMM (90 - <100%) */}
+                {/* Kategori B: Tidak Memenuhi */}
                 <div className="p-4 rounded-xl border border-amber-200 bg-amber-50/50 space-y-1.5">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-bold text-amber-900 flex items-center gap-1.5">
-                      <Clock className="w-4 h-4 text-amber-600" />
-                      Kategori B: Pembinaan Pengawasan DSMM (90.0% ≤ Skor Komposit &lt; 100%)
+                      <ShieldAlert className="w-4 h-4 text-rose-600" />
+                      Kategori B: Tidak Memenuhi Minimal Satu Kewajiban PUVA
                     </span>
                     <span className="text-[11px] font-bold px-2 py-0.5 rounded bg-amber-200 text-amber-900">
-                      {previewM01?.categories?.pembinaan?.length || 4} Bank
+                      {previewM01?.categories?.tidak_memenuhi?.length ?? 0} Bank
                     </span>
                   </div>
-                  <p className="text-[11px] text-amber-900">
-                    <strong>Rekomendasi DSMM:</strong> Penyampaian Surat / Email Pembinaan oleh DSMM terkait disiplin kuotasi pasar sekunder dan pemenuhan counterparty line.
-                  </p>
+
                   <div className="space-y-1 pt-1">
-                    {previewM01?.categories?.pembinaan?.map((b) => (
+                    {previewM01?.categories?.tidak_memenuhi?.map((b) => (
                       <div key={b.bank_name} className="text-[11px] text-slate-700 flex items-center justify-between bg-white/70 px-2 py-1 rounded border border-amber-200/50">
                         <span><strong>{b.bank_name}</strong> ({b.notes})</span>
                         <span className="font-mono font-bold text-amber-800">{b.score.toFixed(1)}%</span>
@@ -816,22 +805,20 @@ export const DocGeneratorView: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Kategori C: Sanksi Teguran (<90%) */}
+                {/* Kategori C: Data Belum Lengkap */}
                 <div className="p-4 rounded-xl border border-rose-200 bg-rose-50/50 space-y-1.5">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-bold text-rose-900 flex items-center gap-1.5">
-                      <ShieldAlert className="w-4 h-4 text-rose-600" />
-                      Kategori C: Sanksi Administratif Teguran Tertulis (Skor Komposit &lt; 90.0%)
+                      <Clock className="w-4 h-4 text-amber-600" />
+                      Kategori C: Data Evaluasi Belum Lengkap
                     </span>
                     <span className="text-[11px] font-bold px-2 py-0.5 rounded bg-rose-200 text-rose-900">
-                      {previewM01?.categories?.sanksi?.length || 1} Bank
+                      {previewM01?.categories?.data_belum_lengkap?.length ?? 0} Bank
                     </span>
                   </div>
-                  <p className="text-[11px] text-rose-900">
-                    <strong>Rekomendasi DSMM:</strong> Penerbitan Surat Sanksi Administratif Teguran Tertulis sesuai Pasal 32 PADG No. 23 Tahun 2024 atas pelanggaran tenor transaksi pasar sekunder.
-                  </p>
+
                   <div className="space-y-1 pt-1">
-                    {previewM01?.categories?.sanksi?.map((b) => (
+                    {previewM01?.categories?.data_belum_lengkap?.map((b) => (
                       <div key={b.bank_name} className="text-[11px] text-slate-700 flex items-center justify-between bg-white/70 px-2 py-1 rounded border border-rose-200/50">
                         <span><strong>{b.bank_name}</strong> ({b.notes})</span>
                         <span className="font-mono font-bold text-rose-700">{b.score.toFixed(1)}%</span>
@@ -946,7 +933,7 @@ export const DocGeneratorView: React.FC = () => {
                   Lampiran 2: Setelah Threshold
                 </h4>
                 <p className="text-xs text-slate-600 mt-2 leading-relaxed">
-                  Matriks skor terbobot setelah ambang batas aktif ({selectedStage} State). Menampilkan Subtotal PUVA (maks 60%), OM (maks 40%), dan Skor Komposit 100%.
+                  Matriks skor terbobot setelah ambang batas aktif ({selectedStage} State). Menampilkan skor per parameter dan total skor PUVA (maks 60%).
                 </p>
               </div>
             </div>
@@ -958,7 +945,7 @@ export const DocGeneratorView: React.FC = () => {
                   Lampiran 3: Tindak Lanjut Bank
                 </h4>
                 <p className="text-xs text-slate-600 mt-2 leading-relaxed">
-                  Tabel komprehensif status kelulusan 21 Bank (Lulus / Email Pembinaan DSMM / Sanksi Teguran), nomor tiket Finding ID sanggahan, dan tindak lanjut hukum.
+                  Tabel status 21 Bank (Memenuhi / Tidak Memenuhi / Data Belum Lengkap), parameter yang tidak terpenuhi, dan nomor tiket temuan.
                 </p>
               </div>
             </div>

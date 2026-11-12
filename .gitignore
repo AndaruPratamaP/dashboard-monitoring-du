@@ -56,3 +56,11 @@ yarn-error.log*
 
 # AI Assistant Internal Caches
 .gemini/
+
+# Data ril proses as-is (rahasia BI): dipakai lokal untuk demo, JANGAN di-commit
+dataset real proses as is/
+
+# TypeScript incremental build cache
+*.tsbuildinfo
+
+.claude/

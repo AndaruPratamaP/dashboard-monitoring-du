@@ -16,8 +16,9 @@ import {
 
 export const GlobalTopBar: React.FC = () => {
   const {
-    selectedPeriod,
-    setSelectedPeriod,
+    periods,
+    activePeriod,
+    changePeriod,
     selectedStage,
     changeStage,
     isMasked,
@@ -46,13 +47,21 @@ export const GlobalTopBar: React.FC = () => {
           <div className="flex items-center bg-slate-100/90 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-700 shadow-xs">
             <Calendar className="w-3.5 h-3.5 text-slate-500 mr-2 flex-shrink-0" />
             <select
-              value={selectedPeriod}
-              onChange={(e) => setSelectedPeriod(e.target.value)}
+              value={activePeriod?.id ?? ""}
+              onChange={(e) => changePeriod(Number(e.target.value))}
               className="bg-transparent font-semibold text-slate-800 cursor-pointer focus:outline-none pr-1"
             >
-              <option value="2026-Q2">Triwulan II - 2026</option>
-              <option value="2026-Q1">Triwulan I - 2026</option>
-              <option value="2025-Q4">Triwulan IV - 2025</option>
+              {periods.length === 0 && <option value="">Belum ada periode</option>}
+              {periods.map((p) => {
+                const [year, q] = p.triwulan.split("-Q")
+                const roman = ["I", "II", "III", "IV"][Number(q) - 1] || q
+                return (
+                  <option key={p.id} value={p.id}>
+                    Triwulan {roman} - {year}
+                    {p.is_sample_data ? " (data sample)" : ""}
+                  </option>
+                )
+              })}
             </select>
           </div>
 

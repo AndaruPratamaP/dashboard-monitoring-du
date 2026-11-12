@@ -57,3 +57,27 @@ def get_db():
     finally:
         db.close()
 
+
+
+def ensure_schema():
+    """
+    Migrasi ringan untuk database yang sudah ada: create_all tidak menambah kolom baru
+    ke tabel lama, jadi kolom model yang belum ada di database ditambahkan di sini.
+    Kolom lama yang sudah tidak dipakai (mis. OM) dibiarkan dan diabaikan.
+    """
+    from sqlalchemy import inspect, text
+
+    import models  # noqa: F401  (memastikan seluruh tabel terdaftar di metadata)
+
+    insp = inspect(engine)
+    existing_tables = set(insp.get_table_names())
+    for table in Base.metadata.sorted_tables:
+        if table.name not in existing_tables:
+            continue
+        existing_cols = {c["name"] for c in insp.get_columns(table.name)}
+        for col in table.columns:
+            if col.name in existing_cols:
+                continue
+            col_type = col.type.compile(dialect=engine.dialect)
+            with engine.begin() as conn:
+                conn.execute(text(f'ALTER TABLE {table.name} ADD COLUMN "{col.name}" {col_type}'))

@@ -6,12 +6,13 @@ Departemen Pengembangan Pasar Keuangan (DPPK) Bank Indonesia
 
 import json
 import logging
+import re
 from datetime import datetime
 from typing import Dict, Any, List, Tuple, Optional
 import pandas as pd
 from sqlalchemy.orm import Session
 
-from models import MasterBank, EvaluationPeriod, BankScoreMatrix, FindingTicket, AuditTrail
+from models import MasterBank, EvaluationPeriod, BankScoreMatrix, FindingTicket, AuditTrail, get_active_period
 from services.entity_resolution import EntityResolver
 
 logger = logging.getLogger("rule_engine")
@@ -22,19 +23,16 @@ THRESHOLDS = {
         "B1": 80.0, "B2": 80.0, "B3": 80.0,
         "B4": 50.0, "B5": 50.0,
         "B6": 80.0, "B7a": 80.0, "B7b": 80.0, "B8": 80.0,
-        "OM1": 70.0, "OM2": 85.0, "OM3": 60.0,
     },
     "INTERMEDIATE": {
         "B1": 85.0, "B2": 85.0, "B3": 85.0,
         "B4": 70.0, "B5": 70.0,
         "B6": 85.0, "B7a": 85.0, "B7b": 85.0, "B8": 85.0,
-        "OM1": 80.0, "OM2": 90.0, "OM3": 60.0,
     },
     "END_STATE": {
         "B1": 90.0, "B2": 90.0, "B3": 90.0,
         "B4": 80.0, "B5": 80.0,
         "B6": 90.0, "B7a": 90.0, "B7b": 90.0, "B8": 90.0,
-        "OM1": 90.0, "OM2": 95.0, "OM3": 60.0,
     },
 }
 
@@ -49,9 +47,6 @@ WEIGHTS = {
     "B7a": 20.0, # Transaksi Repo Pasar Sekunder
     "B7b": 5.0,  # Transaksi SRBI Pasar Sekunder
     "B8": 10.0,  # Matchmaking OIS
-    "OM1": 15.0, # Penawaran Lelang OPT
-    "OM2": 20.0, # Volume Win SRBI
-    "OM3": 5.0,  # Penawaran Lelang BI-FRN
 }
 
 PARAMETER_NAMES = {
@@ -64,9 +59,6 @@ PARAMETER_NAMES = {
     "B7a": "Transaksi Repo Pasar Sekunder",
     "B7b": "Transaksi SRBI Pasar Sekunder",
     "B8": "Matchmaking OIS",
-    "OM1": "Penawaran Lelang OPT",
-    "OM2": "Volume Win SRBI",
-    "OM3": "Penawaran Lelang BI-FRN",
 }
 
 PARAMETER_DETAILS = {
@@ -79,9 +71,6 @@ PARAMETER_DETAILS = {
     "B7a": "Tenor minimal 2 minggu (>=14 hari), minimal 60% hari kerja (36 hari)",
     "B7b": "Sisa jangka waktu minimal 3 bulan, minimal 60% hari kerja (36 hari)",
     "B8": "Tenor 1M dan 3M pada setiap sesi matchmaking OIS (6 periode)",
-    "OM1": "Penawaran pada setiap hari lelang OPT",
-    "OM2": "Volume win SRBI (KBMI 4 min. 3%, KBMI lain min. 1%)",
-    "OM3": "Penawaran pada setiap hari lelang BI-FRN",
 }
 
 
@@ -218,23 +207,25 @@ def calculate_puva_raw_metrics(
             r_non = float(s_row["Jml_Line_Repo_Bank_Non_DU"])
             ois_du = float(s_row["Jml_Line_OIS_Bank_DU"])
         else:
-            r_du, r_non, ois_du = 15.0, 35.0, 15.0
+            # Data survey tidak ditemukan -> dihitung 0 (bukan dianggap patuh)
+            r_du, r_non, ois_du = 0.0, 0.0, 0.0
 
         b4_raw = round((min(r_du / 10.0, 1.0) * 50.0 + min(r_non / 10.0, 1.0) * 50.0), 2)
         b5_raw = round(min(100.0, (ois_du / 10.0) * 100.0), 2)
 
-        if b4_raw < 50.0:
+        survey_missing = surv_match.empty
+        if b4_raw < 100.0:
             failed_transactions[f"{b_id}-B4"] = [{
                 "parameter": "Counterparty Line Repo",
                 "realisasi_line_du": int(r_du), "target_line_du": 10,
                 "realisasi_line_non_du": int(r_non), "target_line_non_du": 10,
-                "alasan": f"Hanya memiliki {int(r_du)} line DU dan {int(r_non)} line Non-DU (di bawah target minimal 10 DU & 10 Non-DU)"
+                "alasan": "Data survey counterparty line bank tidak ditemukan pada file sumber" if survey_missing else f"Hanya memiliki {int(r_du)} line DU dan {int(r_non)} line Non-DU (di bawah target minimal 10 DU & 10 Non-DU)"
             }]
-        if b5_raw < 50.0:
+        if b5_raw < 100.0:
             failed_transactions[f"{b_id}-B5"] = [{
                 "parameter": "Counterparty Line OIS",
                 "realisasi_line_du": int(ois_du), "target_line_du": 10,
-                "alasan": f"Hanya memiliki {int(ois_du)} line OIS Bank DU (di bawah target minimal 10 Bank DU)"
+                "alasan": "Data survey counterparty line bank tidak ditemukan pada file sumber" if survey_missing else f"Hanya memiliki {int(ois_du)} line OIS Bank DU (di bawah target minimal 10 Bank DU)"
             }]
 
         # ----------------------------------------------------------------------
@@ -243,7 +234,8 @@ def calculate_puva_raw_metrics(
         # (Skenario: Bank D menjual 195 M dari 1000 M win = 19.5% -> rasio 65.00%)
         # ----------------------------------------------------------------------
         win_rows = df_hartis_p[df_hartis_p["Nama_Bank_HARTIS"].apply(lambda x: resolver.resolve(x) == bank)]
-        win_vol = float(win_rows["Total_Volume_Win_SRBI_Miliar_Rp"].sum()) if not win_rows.empty else 1000.0
+        win_missing = win_rows.empty
+        win_vol = float(win_rows["Total_Volume_Win_SRBI_Miliar_Rp"].sum()) if not win_missing else 0.0
         target_sales = 0.30 * win_vol
 
         sec_srbi = df_hartis_s[
@@ -254,8 +246,18 @@ def calculate_puva_raw_metrics(
         actual_sales = float(sec_srbi["Volume_Miliar_Rp"].sum()) if not sec_srbi.empty else 0.0
         pct_sales_of_win = (actual_sales / win_vol * 100.0) if win_vol > 0 else 0.0
 
-        b6_raw = round(min(100.0, (pct_sales_of_win / 30.0) * 100.0), 2) if target_sales > 0 else 100.0
-        if b6_raw < 80.0:
+        if win_missing:
+            # Data lelang perdana tidak ditemukan -> tidak dapat diverifikasi, dihitung 0
+            b6_raw = 0.0
+        elif target_sales > 0:
+            b6_raw = round(min(100.0, (pct_sales_of_win / 30.0) * 100.0), 2)
+        else:
+            b6_raw = 100.0  # Bank memang tidak memiliki volume win -> tidak ada kewajiban jual
+        if win_missing:
+            failed_transactions[f"{b_id}-B6"] = [{
+                "alasan": "Data volume win lelang perdana SRBI bank tidak ditemukan pada file HARTIS"
+            }]
+        elif b6_raw < 100.0:
             failed_transactions[f"{b_id}-B6"] = [{
                 "volume_win_perdana": win_vol,
                 "target_kewajiban_30pct": target_sales,
@@ -320,7 +322,6 @@ def calculate_puva_raw_metrics(
             "B1": b1_raw, "B2": b2_raw, "B3": b3_raw,
             "B4": b4_raw, "B5": b5_raw,
             "B6": b6_raw, "B7a": b7a_raw, "B7b": b7b_raw, "B8": b8_raw,
-            "OM1": 100.0, "OM2": 100.0, "OM3": 100.0,  # Default slot OM untuk Live Demo
         }
 
         breakdown_stats[b_id] = {
@@ -338,23 +339,71 @@ def calculate_puva_raw_metrics(
     return raw_metrics, failed_transactions, breakdown_stats
 
 
-def evaluate_parameter(param_code: str, raw_value: float, stage: str = "EARLY") -> Dict[str, Any]:
+PUVA_CODES = ["B1", "B2", "B3", "B4", "B5", "B6", "B7a", "B7b", "B8"]
+MAX_PUVA_SCORE = round(sum(WEIGHTS[c] for c in PUVA_CODES), 2)  # 60.0
+
+STATUS_MEMENUHI = "MEMENUHI"
+STATUS_TIDAK_MEMENUHI = "TIDAK_MEMENUHI"
+STATUS_DATA_BELUM_LENGKAP = "DATA_BELUM_LENGKAP"
+
+
+def canonical_code(code: str) -> str:
+    """Normalisasi kode parameter ('b7A', 'B7A ' -> 'B7a')."""
+    c = (code or "").strip().upper()
+    return c[:-1] + c[-1].lower() if c in ("B7A", "B7B") else c
+
+
+def parse_claim_percent(text: Optional[str]) -> Optional[float]:
+    """
+    Ambil nilai realisasi (%) dari teks klaim bank.
+    Prioritas 'Rasio Pemenuhan X%' (mis. B6: '31.50% dari Win Perdana (Rasio Pemenuhan 100.00%)'),
+    lalu angka persentase pertama, lalu angka pertama.
+    """
+    if not text:
+        return None
+    m = (
+        re.search(r"rasio\s+pemenuhan\s*:?\s*(\d+(?:[.,]\d+)?)", text, re.IGNORECASE)
+        or re.search(r"(\d+(?:[.,]\d+)?)\s*%", text)
+        or re.search(r"(\d+(?:[.,]\d+)?)", text)
+    )
+    if not m:
+        return None
+    try:
+        return float(m.group(1).replace(",", "."))
+    except ValueError:
+        return None
+
+
+def matrix_to_raw(entry: BankScoreMatrix) -> Dict[str, Optional[float]]:
+    """Ambil nilai realisasi mentah B1-B8 dari baris matriks (None = data belum diunggah)."""
+    raw: Dict[str, Optional[float]] = {}
+    for code in PUVA_CODES:
+        val = getattr(entry, f"{code.lower()}_raw", None)
+        raw[code] = float(val) if val is not None else None
+    return raw
+
+
+def evaluate_parameter(param_code: str, raw_value: Optional[float], stage: str = "EARLY") -> Dict[str, Any]:
     """
     Evaluasi satu indikator terhadap threshold aktif.
-    Jika lolos (raw >= threshold) -> skor = bobot.
-    Jika gagal -> skor = 0.
+    Lolos (raw >= threshold) -> skor = bobot; gagal -> 0.
+    raw_value None -> sumber data belum diunggah: passed None, skor 0.
     """
     st = stage.upper() if stage.upper() in THRESHOLDS else "EARLY"
     threshold = THRESHOLDS[st].get(param_code, 80.0)
     weight = WEIGHTS.get(param_code, 0.0)
 
-    passed = round(raw_value, 2) >= round(threshold, 2)
-    score = weight if passed else 0.0
+    if raw_value is None:
+        passed = None
+        score = 0.0
+    else:
+        passed = round(raw_value, 2) >= round(threshold, 2)
+        score = weight if passed else 0.0
 
     return {
         "parameter_code": param_code,
         "name": PARAMETER_NAMES.get(param_code, param_code),
-        "raw_value": round(raw_value, 2),
+        "raw_value": round(raw_value, 2) if raw_value is not None else None,
         "threshold": threshold,
         "weight": weight,
         "passed": passed,
@@ -364,49 +413,35 @@ def evaluate_parameter(param_code: str, raw_value: float, stage: str = "EARLY") 
 
 def compute_matrix_scores(raw_dict: dict, stage: str = "EARLY") -> Dict[str, Any]:
     """
-    Hitung nilai bobot, total PUVA, total OM, dan status kepatuhan komposit.
+    Hitung skor terbobot 9 parameter PUVA, total skor PUVA (maks 60%), dan status akhir.
+    Parameter yang tidak ada di raw_dict / bernilai None dianggap belum ada data.
     """
     results: Dict[str, Any] = {}
     total_puva = 0.0
-    total_om = 0.0
+    any_failed = False
+    any_missing = False
 
-    puva_codes = ["B1", "B2", "B3", "B4", "B5", "B6", "B7a", "B7b", "B8"]
-    om_codes = ["OM1", "OM2", "OM3"]
-
-    for code in puva_codes:
-        raw_val = raw_dict.get(code, 0.0)
-        res = evaluate_parameter(code, raw_val, stage)
-        key = code.lower().replace("b7a", "b7a").replace("b7b", "b7b")
-        results[f"{key}_raw"] = res["raw_value"]
-        results[f"{key}_passed"] = res["passed"]
-        results[f"{key}_score"] = res["score"]
-        total_puva += res["score"]
-
-    for code in om_codes:
-        raw_val = raw_dict.get(code, 100.0)
-        res = evaluate_parameter(code, raw_val, stage)
+    for code in PUVA_CODES:
+        res = evaluate_parameter(code, raw_dict.get(code), stage)
         key = code.lower()
         results[f"{key}_raw"] = res["raw_value"]
         results[f"{key}_passed"] = res["passed"]
         results[f"{key}_score"] = res["score"]
-        total_om += res["score"]
+        total_puva += res["score"]
+        if res["passed"] is None:
+            any_missing = True
+        elif not res["passed"]:
+            any_failed = True
 
-    total_puva = round(total_puva, 2)
-    total_om = round(total_om, 2)
-    composite = round(total_puva + total_om, 2)
-
-    if composite >= 100.0:
-        compliance = "MEMENUHI"
-    elif composite >= 90.0:
-        compliance = "PEMBINAAN_DSMM"
+    if any_failed:
+        status = STATUS_TIDAK_MEMENUHI
+    elif any_missing:
+        status = STATUS_DATA_BELUM_LENGKAP
     else:
-        compliance = "SANKSI_TEGURAN"
+        status = STATUS_MEMENUHI
 
-    results["total_puva_score"] = total_puva
-    results["total_om_score"] = total_om
-    results["composite_score"] = composite
-    results["compliance_status"] = compliance
-
+    results["total_puva_score"] = round(total_puva, 2)
+    results["compliance_status"] = status
     return results
 
 
@@ -431,7 +466,7 @@ def evaluate_and_sync_database(
     if period_id:
         period = db.query(EvaluationPeriod).filter(EvaluationPeriod.id == period_id).first()
     else:
-        period = db.query(EvaluationPeriod).order_by(EvaluationPeriod.id.desc()).first()
+        period = get_active_period(db)
 
     if not period:
         period = EvaluationPeriod(
@@ -450,9 +485,7 @@ def evaluate_and_sync_database(
     banks = db.query(MasterBank).order_by(MasterBank.Bank_ID).all()
     created_findings = 0
     updated_findings = 0
-    full_compliance_count = 0
-    pembinaan_count = 0
-    sanksi_count = 0
+    status_counts = {STATUS_MEMENUHI: 0, STATUS_TIDAK_MEMENUHI: 0, STATUS_DATA_BELUM_LENGKAP: 0}
 
     puva_codes = ["B1", "B2", "B3", "B4", "B5", "B6", "B7a", "B7b", "B8"]
 
@@ -463,19 +496,24 @@ def evaluate_and_sync_database(
             BankScoreMatrix.Bank_ID == b_id
         ).first()
 
-        # Ambil raw metrics
+        # Ambil raw metrics: hasil ingest baru > nilai tersimpan > None (sumber belum diunggah).
+        # Bank yang tidak muncul di file sumber yang SUDAH diunggah diberi 0 oleh parser.
+        bank_raw = matrix_to_raw(matrix_entry) if matrix_entry else {code: None for code in puva_codes}
         if raw_metrics and b_id in raw_metrics:
-            bank_raw = raw_metrics[b_id]
-        elif matrix_entry:
-            bank_raw = {
-                "B1": matrix_entry.b1_raw, "B2": matrix_entry.b2_raw, "B3": matrix_entry.b3_raw,
-                "B4": matrix_entry.b4_raw, "B5": matrix_entry.b5_raw,
-                "B6": matrix_entry.b6_raw, "B7a": matrix_entry.b7a_raw, "B7b": matrix_entry.b7b_raw, "B8": matrix_entry.b8_raw,
-                "OM1": matrix_entry.om1_raw or 100.0, "OM2": matrix_entry.om2_raw or 100.0, "OM3": matrix_entry.om3_raw or 100.0,
-            }
-        else:
-            bank_raw = {code: 100.0 for code in puva_codes}
-            bank_raw.update({"OM1": 100.0, "OM2": 100.0, "OM3": 100.0})
+            bank_raw.update({k: v for k, v in raw_metrics[b_id].items() if k in puva_codes})
+
+        # Terapkan kembali nilai hasil sanggahan yang telah DISETUJUI petugas BI,
+        # agar ETL ulang / ganti tahap tidak menghapus keputusan human-in-the-loop.
+        approved_tickets = db.query(FindingTicket).filter(
+            FindingTicket.Bank_ID == b_id,
+            FindingTicket.period_id == period.id,
+            FindingTicket.BI_Decision_Status == "APPROVED",
+            FindingTicket.Approved_Value.isnot(None),
+        ).all()
+        for t in approved_tickets:
+            code = canonical_code(t.Parameter_Code)
+            if code in bank_raw:
+                bank_raw[code] = max(bank_raw[code] or 0.0, float(t.Approved_Value))
 
         # Hitung skor berdasarkan threshold aktif
         scores = compute_matrix_scores(bank_raw, stage=stage_upper)
@@ -489,30 +527,30 @@ def evaluate_and_sync_database(
                 setattr(matrix_entry, k, v)
 
         if breakdown_stats and b_id in breakdown_stats:
-            matrix_entry.detail_metrics_json = json.dumps(breakdown_stats[b_id])
+            # Gabungkan dengan rincian parameter lain (ingest bisa per sumber data)
+            try:
+                merged = json.loads(matrix_entry.detail_metrics_json or "{}")
+            except ValueError:
+                merged = {}
+            merged.update(breakdown_stats[b_id])
+            matrix_entry.detail_metrics_json = json.dumps(merged)
 
         matrix_entry.updated_at = datetime.utcnow()
 
-        # Hitung statistik
-        if scores["compliance_status"] == "MEMENUHI":
-            full_compliance_count += 1
-        elif scores["compliance_status"] == "PEMBINAAN_DSMM":
-            pembinaan_count += 1
-        else:
-            sanksi_count += 1
+        status_counts[scores["compliance_status"]] += 1
 
         # Cek apakah ada parameter PUVA yang gugur terhadap threshold aktif
         for code in puva_codes:
             code_key = code.lower()
-            is_passed = scores.get(f"{code_key}_passed", True)
-            raw_val = scores.get(f"{code_key}_raw", 100.0)
+            is_passed = scores.get(f"{code_key}_passed")
+            raw_val = scores.get(f"{code_key}_raw")
             threshold_val = THRESHOLDS[stage_upper].get(code, 80.0)
 
             # Format Finding_ID standar: FND-2026Q2-DU01-B2
             b_short = b_id.replace("-", "")
             finding_id = f"FND-{triwulan_str}-{b_short}-{code.upper()}"
 
-            if not is_passed:
+            if is_passed is False:
                 # Cari detail transaksi gugur
                 lookup_key = f"{b_id}-{code}"
                 gugur_data = (failed_transactions or {}).get(lookup_key, [])
@@ -551,7 +589,11 @@ def evaluate_and_sync_database(
     audit = AuditTrail(
         action=f"THRESHOLD_RECALCULATE_{stage_upper}",
         performed_by="Rule Engine Evaluator",
-        details=f"Evaluasi threshold tahap {stage_upper} selesai. Lolos: {full_compliance_count}, Pembinaan: {pembinaan_count}, Sanksi: {sanksi_count}.",
+        details=(
+            f"Evaluasi threshold tahap {stage_upper} ({period.Triwulan}) selesai. "
+            f"Memenuhi: {status_counts[STATUS_MEMENUHI]}, Tidak memenuhi: {status_counts[STATUS_TIDAK_MEMENUHI]}, "
+            f"Data belum lengkap: {status_counts[STATUS_DATA_BELUM_LENGKAP]}."
+        ),
     )
     db.add(audit)
     db.commit()
@@ -560,9 +602,9 @@ def evaluate_and_sync_database(
         "status": "success",
         "stage": stage_upper,
         "period": period.Triwulan,
-        "full_compliance_count": full_compliance_count,
-        "pembinaan_count": pembinaan_count,
-        "sanksi_count": sanksi_count,
+        "memenuhi_count": status_counts[STATUS_MEMENUHI],
+        "tidak_memenuhi_count": status_counts[STATUS_TIDAK_MEMENUHI],
+        "data_belum_lengkap_count": status_counts[STATUS_DATA_BELUM_LENGKAP],
         "created_findings": created_findings,
         "updated_findings": updated_findings,
     }

@@ -106,11 +106,15 @@ export const DrillDownDrawer: React.FC = () => {
                 </div>
                 <div>
                   <div className="font-bold text-sm">
-                    {drillDown.isPassed ? "Lolos Threshold" : "Di Bawah Threshold"}
+                    {drillDown.isPassed === null
+                      ? "Belum Ada Data"
+                      : drillDown.isPassed
+                        ? "Lolos Threshold"
+                        : "Di Bawah Threshold"}
                   </div>
                   <div className="text-xs opacity-80 mt-0.5">
-                    {drillDown.isPassed
-                      ? `Capaian ${drillDown.rawRate}% (Min. ${drillDown.threshold}%)`
+                    {drillDown.rawRate === null
+                      ? `Sumber data parameter ini belum diunggah (Min. ${drillDown.threshold}%)`
                       : `Capaian ${drillDown.rawRate}% (Min. ${drillDown.threshold}%)`}
                   </div>
                 </div>
@@ -131,7 +135,7 @@ export const DrillDownDrawer: React.FC = () => {
                   Realisasi
                 </span>
                 <span className="text-2xl font-black text-slate-900">
-                  {drillDown.rawRate}%
+                  {drillDown.rawRate === null ? "—" : `${drillDown.rawRate}%`}
                 </span>
               </div>
 

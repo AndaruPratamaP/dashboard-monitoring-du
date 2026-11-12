@@ -54,13 +54,13 @@ export const BankWorkbooksView: React.FC = () => {
         {filtered.map((item) => {
           const displayName = isMasked ? item.masked_alias : item.nama_resmi_bank
           const isPass = item.compliance_status === "MEMENUHI"
-          const isWarning = item.compliance_status === "PEMBINAAN_DSMM"
-          const isSevere = item.compliance_status === "SANKSI_TEGURAN"
+          const isWarning = item.compliance_status === "DATA_BELUM_LENGKAP"
+          const isSevere = item.compliance_status === "TIDAK_MEMENUHI"
 
           // Hitung parameter yang gagal
           const failedParams = Object.entries(item.passed_flags)
-            .filter(([key, passed]) => !passed && key.startsWith("b"))
-            .map(([key]) => key.toUpperCase())
+            .filter(([, passed]) => passed === false)
+            .map(([key]) => key)
 
           return (
             <div
@@ -88,19 +88,19 @@ export const BankWorkbooksView: React.FC = () => {
                   {isPass && (
                     <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1">
                       <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                      100% Memenuhi
+                      Memenuhi
                     </span>
                   )}
                   {isWarning && (
                     <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300 flex items-center gap-1">
                       <AlertTriangle className="w-3 h-3 text-amber-600" />
-                      Pembinaan DSMM
+                      Data Belum Lengkap
                     </span>
                   )}
                   {isSevere && (
                     <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 border border-rose-300 flex items-center gap-1">
                       <AlertTriangle className="w-3 h-3 text-rose-600" />
-                      Sanksi Teguran
+                      Tidak Memenuhi
                     </span>
                   )}
                 </div>
@@ -121,9 +121,9 @@ export const BankWorkbooksView: React.FC = () => {
                     </strong>
                   </div>
                   <div>
-                    <span className="text-[10px] text-slate-400 block">Komposit Total:</span>
+                    <span className="text-[10px] text-slate-400 block">Parameter Tidak Terpenuhi:</span>
                     <strong className="text-slate-900 font-mono text-sm">
-                      {item.composite_score.toFixed(1)}% <span className="text-[10px] font-normal text-slate-400">/ 100%</span>
+                      {failedParams.length} <span className="text-[10px] font-normal text-slate-400">/ 9</span>
                     </strong>
                   </div>
                 </div>
@@ -143,7 +143,9 @@ export const BankWorkbooksView: React.FC = () => {
                   <div className="mt-3 p-2 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-900 text-xs flex items-center space-x-2">
                     <ShieldCheck className="w-4 h-4 text-emerald-600 flex-shrink-0" />
                     <span className="text-[11px] font-medium text-emerald-800">
-                      Seluruh 9 parameter berada di atas ambang batas.
+                      {isWarning
+                        ? `Belum ada data: ${Object.entries(item.raw_metrics).filter(([, v]) => v === null).map(([k]) => k).join(", ")}`
+                        : "Seluruh 9 parameter berada di atas ambang batas."}
                     </span>
                   </div>
                 )}

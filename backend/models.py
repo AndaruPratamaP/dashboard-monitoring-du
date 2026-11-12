@@ -22,6 +22,11 @@ class MasterBank(Base):
     Kelompok_KBMI = Column(String(20), nullable=False)  # KBMI 2, KBMI 3, KBMI 4
     Kode_Bloomberg = Column(String(50), nullable=False)  # Misal: BBRI IJ
     Kode_SPPA_Antasena = Column(String(50), nullable=False)  # Misal: BRI
+    Nama_Singkat = Column(String(100), nullable=True)        # Misal: BRI, Mandiri
+    Sandi_BI = Column(String(10), nullable=True, index=True)  # Misal: 002 (DS Antasena / HARTIS)
+    Kode_BBG = Column(String(20), nullable=True)             # Kode submitter Bloomberg, misal: BRIJ
+    No_Urut_Konfirmasi = Column(Integer, nullable=True)      # Nomor file workbook konfirmasi BI
+    Aliases_JSON = Column(Text, nullable=True)               # Variasi penulisan nama/kode di file sumber
 
     # Relationships
     score_matrices = relationship("BankScoreMatrix", back_populates="bank", cascade="all, delete-orphan")
@@ -40,6 +45,9 @@ class EvaluationPeriod(Base):
     Locked_By = Column(String(100), nullable=True)
     Snapshot_ID = Column(String(50), nullable=True)
     Snapshot_Data_JSON = Column(Text, nullable=True)
+    Is_Active = Column(Boolean, nullable=True, default=False)  # Periode yang sedang ditampilkan/diolah
+    Working_Days_JSON = Column(Text, nullable=True)      # Daftar hari kerja periode (ISO date)
+    MM_OIS_Sessions_JSON = Column(Text, nullable=True)   # Daftar tanggal sesi matchmaking OIS
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
     # Relationships
@@ -55,26 +63,26 @@ class BankScoreMatrix(Base):
     Bank_ID = Column(String(20), ForeignKey("master_banks.Bank_ID"), nullable=False, index=True)
 
     # --- 1. Persentase Realisasi Mentah (Sebelum Threshold, dalam %) ---
-    b1_raw = Column(Float, default=0.0)    # Kuotasi Repo (Bobot 2.5%)
-    b2_raw = Column(Float, default=0.0)    # Kuotasi SRBI (Bobot 2.5%)
-    b3_raw = Column(Float, default=0.0)    # Kuotasi OIS (Bobot 2.5%)
-    b4_raw = Column(Float, default=0.0)    # Counterparty Line Repo (Bobot 7.5%)
-    b5_raw = Column(Float, default=0.0)    # Counterparty Line OIS (Bobot 2.5%)
-    b6_raw = Column(Float, default=0.0)    # Penjualan SRBI Pasar Sekunder (Bobot 7.5%)
-    b7a_raw = Column(Float, default=0.0)   # Transaksi Repo Sekunder Tenor >= 14h (Bobot 20.0%)
-    b7b_raw = Column(Float, default=0.0)   # Transaksi SRBI Sekunder Sisa 3Bln (Bobot 5.0%)
-    b8_raw = Column(Float, default=0.0)    # Matchmaking OIS (Bobot 10.0%)
+    b1_raw = Column(Float, nullable=True)    # Kuotasi Repo (Bobot 2.5%)
+    b2_raw = Column(Float, nullable=True)    # Kuotasi SRBI (Bobot 2.5%)
+    b3_raw = Column(Float, nullable=True)    # Kuotasi OIS (Bobot 2.5%)
+    b4_raw = Column(Float, nullable=True)    # Counterparty Line Repo (Bobot 7.5%)
+    b5_raw = Column(Float, nullable=True)    # Counterparty Line OIS (Bobot 2.5%)
+    b6_raw = Column(Float, nullable=True)    # Penjualan SRBI Pasar Sekunder (Bobot 7.5%)
+    b7a_raw = Column(Float, nullable=True)   # Transaksi Repo Sekunder Tenor >= 14h (Bobot 20.0%)
+    b7b_raw = Column(Float, nullable=True)   # Transaksi SRBI Sekunder Sisa 3Bln (Bobot 5.0%)
+    b8_raw = Column(Float, nullable=True)    # Matchmaking OIS (Bobot 10.0%)
 
     # --- 2. Status Lolos / Gagal Terhadap Threshold Aktif (Boolean) ---
-    b1_passed = Column(Boolean, default=False)
-    b2_passed = Column(Boolean, default=False)
-    b3_passed = Column(Boolean, default=False)
-    b4_passed = Column(Boolean, default=False)
-    b5_passed = Column(Boolean, default=False)
-    b6_passed = Column(Boolean, default=False)
-    b7a_passed = Column(Boolean, default=False)
-    b7b_passed = Column(Boolean, default=False)
-    b8_passed = Column(Boolean, default=False)
+    b1_passed = Column(Boolean, nullable=True)
+    b2_passed = Column(Boolean, nullable=True)
+    b3_passed = Column(Boolean, nullable=True)
+    b4_passed = Column(Boolean, nullable=True)
+    b5_passed = Column(Boolean, nullable=True)
+    b6_passed = Column(Boolean, nullable=True)
+    b7a_passed = Column(Boolean, nullable=True)
+    b7b_passed = Column(Boolean, nullable=True)
+    b8_passed = Column(Boolean, nullable=True)
 
     # --- 3. Skor Terbobot Setelah Threshold (Jika Lolos dapat bobot penuh, Gagal = 0) ---
     b1_score = Column(Float, default=0.0)   # Maks 2.5%
@@ -88,28 +96,13 @@ class BankScoreMatrix(Base):
     b8_score = Column(Float, default=0.0)   # Maks 10.0%
     total_puva_score = Column(Float, default=0.0)  # Maks 60.0%
 
-    # --- 4. Slot Input Operasi Moneter (OM - DPMA, Maks 40%) ---
-    om1_raw = Column(Float, default=100.0)   # Penawaran Lelang OPT (Bobot 15.0%)
-    om1_passed = Column(Boolean, default=True)
-    om1_score = Column(Float, default=15.0)
-
-    om2_raw = Column(Float, default=100.0)   # Volume Win SRBI (Bobot 20.0%)
-    om2_passed = Column(Boolean, default=True)
-    om2_score = Column(Float, default=20.0)
-
-    om3_raw = Column(Float, default=100.0)   # Penawaran Lelang BI-FRN (Bobot 5.0%)
-    om3_passed = Column(Boolean, default=True)
-    om3_score = Column(Float, default=5.0)
-
-    total_om_score = Column(Float, default=40.0)  # Maks 40.0%
-
-    # --- 5. Skor Komposit & Status Tindak Lanjut Akhir ---
-    composite_score = Column(Float, default=100.0)  # Maks 100.0%
-    compliance_status = Column(String(50), default="MEMENUHI")
+    # --- 4. Status Akhir (OM/DPMA dihapus dari ruang lingkup; skor akhir = total PUVA, maks 60%) ---
+    compliance_status = Column(String(50), default="DATA_BELUM_LENGKAP")
     # Nilai compliance_status:
-    # - "MEMENUHI" (100%) -> Lulus Penuh
-    # - "PEMBINAAN_DSMM" (90.0% s.d. <100%) -> Email Pembinaan oleh DSMM
-    # - "SANKSI_TEGURAN" (<90.0%) -> Sanksi Administratif Teguran Tertulis
+    # - "MEMENUHI"            -> seluruh 9 parameter PUVA lolos threshold (skor 60%)
+    # - "TIDAK_MEMENUHI"      -> minimal satu parameter di bawah threshold
+    # - "DATA_BELUM_LENGKAP"  -> ada parameter yang sumber datanya belum diunggah
+    # Catatan: nilai *_raw = NULL berarti sumber data parameter tsb belum diunggah.
 
     # JSON Rincian pembentuk angka untuk Slide-over Drawer UI
     detail_metrics_json = Column(Text, nullable=True)
@@ -135,6 +128,7 @@ class FindingTicket(Base):
     AI_Recommendation_Status = Column(String(50), nullable=True)   # APPROVE / REJECT / PARTIAL_REVIEW
     AI_Analysis_Text = Column(Text, nullable=True)
     BI_Decision_Status = Column(String(30), nullable=False, default="OPEN")  # OPEN / PENDING_REVIEW / APPROVED / REJECTED
+    Approved_Value = Column(Float, nullable=True)                  # Nilai realisasi (%) yang ditetapkan petugas BI saat APPROVED
     Verified_By = Column(String(100), nullable=True)
     Updated_At = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
 
@@ -151,3 +145,14 @@ class AuditTrail(Base):
     action = Column(String(100), nullable=False)
     performed_by = Column(String(100), default="System")
     details = Column(Text, nullable=True)
+
+
+def get_active_period(db) -> "EvaluationPeriod":
+    """
+    Periode evaluasi aktif: yang ditandai Is_Active, atau periode terbaru bila belum ada.
+    Dipakai seluruh endpoint/generator agar matriks, temuan, snapshot, dan dokumen konsisten.
+    """
+    period = db.query(EvaluationPeriod).filter(EvaluationPeriod.Is_Active.is_(True)).first()
+    if period is None:
+        period = db.query(EvaluationPeriod).order_by(EvaluationPeriod.id.desc()).first()
+    return period

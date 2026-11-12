@@ -22,7 +22,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
-from models import MasterBank, EvaluationPeriod, BankScoreMatrix, FindingTicket, AuditTrail
+from models import get_active_period, MasterBank, EvaluationPeriod, BankScoreMatrix, FindingTicket, AuditTrail
 from services.rule_engine import THRESHOLDS, WEIGHTS, PARAMETER_NAMES
 
 
@@ -69,6 +69,25 @@ def _set_table_borders(table, color="CBD5E1", sz="4", val="single"):
 # ==============================================================================
 # 1. GENERATOR MEMORANDUM WORD (M.02 & M.01)
 # ==============================================================================
+PUVA_CODES_DOC = ["B1", "B2", "B3", "B4", "B5", "B6", "B7a", "B7b", "B8"]
+TINDAK_LANJUT_PENDING = (
+    "Pemetaan skor PUVA ke tindak lanjut (pembinaan / teguran tertulis) menunggu penetapan "
+    "aturan skor tanpa komponen Operasi Moneter."
+)
+
+
+def _failed_params(m) -> list:
+    return [c for c in PUVA_CODES_DOC if getattr(m, f"{c.lower()}_passed", None) is False]
+
+
+def _missing_params(m) -> list:
+    return [c for c in PUVA_CODES_DOC if getattr(m, f"{c.lower()}_raw", None) is None]
+
+
+def _score(m) -> float:
+    return m.total_puva_score or 0.0
+
+
 def generate_memo_docx(
     db: Session,
     memo_type: str = "m02",
@@ -84,7 +103,7 @@ def generate_memo_docx(
     if memo_type not in ["m02", "m01"]:
         memo_type = "m02"
 
-    period = db.query(EvaluationPeriod).order_by(EvaluationPeriod.id.desc()).first()
+    period = get_active_period(db)
     triwulan_str = period.Triwulan if period else "2026-Q2"
     stage_str = period.Active_Threshold_Stage if period else "EARLY"
 
@@ -92,6 +111,7 @@ def generate_memo_docx(
     matrices = (
         db.query(BankScoreMatrix)
         .join(MasterBank)
+        .filter(BankScoreMatrix.period_id == period.id)
         .order_by(MasterBank.Bank_ID.asc())
         .all()
     )
@@ -100,6 +120,7 @@ def generate_memo_docx(
     tickets = (
         db.query(FindingTicket)
         .join(MasterBank)
+        .filter(FindingTicket.period_id == period.id)
         .order_by(FindingTicket.Finding_ID.asc())
         .all()
     )
@@ -107,8 +128,8 @@ def generate_memo_docx(
     # Statistics
     total_banks = len(matrices)
     full_pass_banks = [m for m in matrices if m.compliance_status == "MEMENUHI"]
-    pembinaan_banks = [m for m in matrices if m.compliance_status == "PEMBINAAN_DSMM"]
-    sanksi_banks = [m for m in matrices if m.compliance_status == "SANKSI_TEGURAN"]
+    tidak_memenuhi_banks = [m for m in matrices if m.compliance_status == "TIDAK_MEMENUHI"]
+    belum_lengkap_banks = [m for m in matrices if m.compliance_status == "DATA_BELUM_LENGKAP"]
 
     doc = Document()
 
@@ -247,12 +268,10 @@ def generate_memo_docx(
             r_nar = p_narasi.add_run(custom_narration.strip())
         else:
             r_nar = p_narasi.add_run(
-                f"Berdasarkan hasil kalkulasi Smart Rule Engine atas 5 sumber data primer (Bloomberg, SPPA Antasena, "
-                f"Survey Counterparty Line, HARTIS, dan DS Antasena), tercatat {len(full_pass_banks)} bank memenuhi seluruh "
-                f"kewajiban (100%), {len(pembinaan_banks)} bank masuk kategori pembinaan DSMM (skor 90% s.d. <100%), "
-                f"dan {len(sanksi_banks)} bank dikenakan sanksi administratif teguran tertulis (skor <90%). "
-                f"Seluruh proses konfirmasi dan sanggahan telah diverifikasi secara akuntabel menggunakan AI Evidence Checker "
-                f"berbasis PADG No. 23 Tahun 2024."
+                f"Berdasarkan hasil perhitungan rule engine PADG No. 23 Tahun 2024 atas data kewajiban Pasar Uang dan "
+                f"Pasar Valas, tercatat {len(full_pass_banks)} bank memenuhi seluruh kewajiban PUVA (skor 60%), "
+                f"{len(tidak_memenuhi_banks)} bank tidak memenuhi minimal satu kewajiban, dan {len(belum_lengkap_banks)} bank "
+                f"dengan data evaluasi yang belum lengkap. {TINDAK_LANJUT_PENDING}"
             )
         r_nar.font.name = "Calibri"
         r_nar.font.size = Pt(10)
@@ -275,11 +294,13 @@ def generate_memo_docx(
             r_h.font.name = "Calibri"
             r_h.font.size = Pt(9.5)
 
+        open_tickets = [t for t in tickets if t.BI_Decision_Status in ("OPEN", "PENDING_REVIEW")]
+        decided_tickets = [t for t in tickets if t.BI_Decision_Status in ("APPROVED", "REJECTED")]
         sum_data = [
-            ("Lolos Penuh Seluruh Kewajiban (100%)", "16 Bank", f"{len(full_pass_banks)} Bank", "Memenuhi standar PADG 23/2024"),
-            ("Perlu Klarifikasi / Tiket Sanggahan", "5 Bank", "0 Bank (Selesai)", "Semua tiket diverifikasi tim BI"),
-            ("Kategori Pembinaan DSMM (90 - <100%)", "4 Bank", f"{len(pembinaan_banks)} Bank", "Rekomendasi surat pembinaan"),
-            ("Kategori Sanksi Teguran Tertulis (<90%)", "1 Bank", f"{len(sanksi_banks)} Bank", "Pelanggaran tenor Repo sekunder"),
+            ("Memenuhi Seluruh Kewajiban PUVA (60%)", "-", f"{len(full_pass_banks)} Bank", "Seluruh 9 parameter lolos threshold"),
+            ("Tiket Temuan / Sanggahan", f"{len(tickets)} Tiket", f"{len(open_tickets)} Terbuka", f"{len(decided_tickets)} telah diputuskan petugas BI"),
+            ("Tidak Memenuhi Minimal Satu Kewajiban", "-", f"{len(tidak_memenuhi_banks)} Bank", "Tindak lanjut menunggu penetapan"),
+            ("Data Evaluasi Belum Lengkap", "-", f"{len(belum_lengkap_banks)} Bank", "Sumber data belum seluruhnya diunggah"),
         ]
 
         for r_idx, row_vals in enumerate(sum_data, start=1):
@@ -440,53 +461,31 @@ def generate_memo_docx(
         p_rule.paragraph_format.line_spacing = 1.15
         p_rule.paragraph_format.space_after = Pt(8)
         r_rule = p_rule.add_run(
-            "Berdasarkan perhitungan Skor Komposit Akhir (Maksimal 60% Komponen PUVA + 40% Komponen Operasi Moneter), "
-            "hasil evaluasi 21 Bank DU PUVA diklasifikasikan ke dalam 3 (tiga) kategori tindak lanjut sebagai berikut:"
+            "Berdasarkan perhitungan Skor PUVA (maksimal 60%, komponen Operasi Moneter tidak termasuk dalam "
+            "evaluasi ini), hasil evaluasi 21 Bank DU PUVA diklasifikasikan sebagai berikut. " + TINDAK_LANJUT_PENDING
         )
         r_rule.font.name = "Calibri"
         r_rule.font.size = Pt(10)
 
-        # Kategori A
-        p_cat_a = doc.add_paragraph()
-        p_cat_a.paragraph_format.left_indent = Inches(0.2)
-        r_ca_t = p_cat_a.add_run("A. Kategori Memenuhi Seluruh Kewajiban (Skor Komposit = 100%)\n")
-        r_ca_t.bold = True
-        r_ca_t.font.color.rgb = RGBColor(5, 150, 105)
-        names_a = [m.bank.Masked_Alias if masked else m.bank.Nama_Resmi_Bank for m in full_pass_banks]
-        r_ca_d = p_cat_a.add_run(
-            f"Sebanyak {len(full_pass_banks)} bank memenuhi seluruh kriteria tanpa catatan kelalaian: "
-            f"{', '.join(names_a)}.\n"
-            "Rekomendasi Tindak Lanjut: Dinyatakan LULUS evaluasi triwulanan secara penuh."
-        )
-        r_ca_d.font.size = Pt(9.5)
-
-        # Kategori B
-        p_cat_b = doc.add_paragraph()
-        p_cat_b.paragraph_format.left_indent = Inches(0.2)
-        r_cb_t = p_cat_b.add_run("B. Kategori Pembinaan Pengawasan DSMM (90.0% <= Skor Komposit < 100%)\n")
-        r_cb_t.bold = True
-        r_cb_t.font.color.rgb = RGBColor(217, 119, 6)
-        names_b = [f"{m.bank.Masked_Alias if masked else m.bank.Nama_Resmi_Bank} ({m.composite_score:.1f}%)" for m in pembinaan_banks]
-        r_cb_d = p_cat_b.add_run(
-            f"Sebanyak {len(pembinaan_banks)} bank berada pada rentang ini: {', '.join(names_b) if names_b else 'Nihil'}.\n"
-            "Rekomendasi Tindak Lanjut: Penyampaian Surat Pembinaan / Email Pembinaan oleh DSMM "
-            "untuk perbaikan disiplin kuotasi pasar sekunder dan peningkatan counterparty line."
-        )
-        r_cb_d.font.size = Pt(9.5)
-
-        # Kategori C
-        p_cat_c = doc.add_paragraph()
-        p_cat_c.paragraph_format.left_indent = Inches(0.2)
-        r_cc_t = p_cat_c.add_run("C. Kategori Sanksi Administratif Teguran Tertulis (Skor Komposit < 90.0%)\n")
-        r_cc_t.bold = True
-        r_cc_t.font.color.rgb = RGBColor(225, 29, 72)
-        names_c = [f"{m.bank.Masked_Alias if masked else m.bank.Nama_Resmi_Bank} ({m.composite_score:.1f}%)" for m in sanksi_banks]
-        r_cc_d = p_cat_c.add_run(
-            f"Sebanyak {len(sanksi_banks)} bank berada pada kategori ini: {', '.join(names_c) if names_c else 'Nihil'}.\n"
-            "Rekomendasi Tindak Lanjut: Penerbitan Surat Sanksi Administratif Teguran Tertulis oleh DSMM "
-            "sesuai Pasal 32 PADG No. 23 Tahun 2024 atas kelalaian transaksi pasar sekunder."
-        )
-        r_cc_d.font.size = Pt(9.5)
+        categories = [
+            ("A. Memenuhi Seluruh Kewajiban PUVA (Skor 60%)", RGBColor(5, 150, 105), full_pass_banks, False),
+            ("B. Tidak Memenuhi Minimal Satu Kewajiban PUVA", RGBColor(225, 29, 72), tidak_memenuhi_banks, True),
+            ("C. Data Evaluasi Belum Lengkap", RGBColor(100, 116, 139), belum_lengkap_banks, False),
+        ]
+        for title, color, banks_in_cat, show_params in categories:
+            p_cat = doc.add_paragraph()
+            p_cat.paragraph_format.left_indent = Inches(0.2)
+            r_t = p_cat.add_run(title + "\n")
+            r_t.bold = True
+            r_t.font.color.rgb = color
+            names = []
+            for m in banks_in_cat:
+                nm = m.bank.Masked_Alias if masked else m.bank.Nama_Resmi_Bank
+                if show_params:
+                    nm += f" ({_score(m):.1f}%; {', '.join(_failed_params(m))})"
+                names.append(nm)
+            r_d = p_cat.add_run(f"Sebanyak {len(banks_in_cat)} bank: {', '.join(names) if names else 'Nihil'}.")
+            r_d.font.size = Pt(9.5)
 
         doc.add_paragraph().paragraph_format.space_after = Pt(6)
 
@@ -496,12 +495,12 @@ def generate_memo_docx(
         h3.runs[0].font.size = Pt(11)
         h3.runs[0].font.color.rgb = RGBColor(15, 23, 42)
 
-        attention_banks = pembinaan_banks + sanksi_banks
+        attention_banks = tidak_memenuhi_banks
         t_att = doc.add_table(rows=len(attention_banks) + 1, cols=5)
         t_att.alignment = WD_TABLE_ALIGNMENT.CENTER
         _set_table_borders(t_att)
 
-        att_headers = ["Bank ID", "Nama Dealer Utama", "Skor Komposit", "Parameter Perhatian", "Rekomendasi DSMM"]
+        att_headers = ["Bank ID", "Nama Dealer Utama", "Skor PUVA (maks 60%)", "Parameter Tidak Terpenuhi", "Tindak Lanjut"]
         for c_idx, h_text in enumerate(att_headers):
             cell = t_att.cell(0, c_idx)
             _set_cell_background(cell, "0F172A")
@@ -516,17 +515,13 @@ def generate_memo_docx(
 
         for idx, m in enumerate(attention_banks, start=1):
             bank_name = m.bank.Masked_Alias if masked else m.bank.Nama_Resmi_Bank
-            failed_p = []
-            for p_code in ["B1", "B2", "B3", "B4", "B5", "B6", "B7a", "B7b", "B8"]:
-                if not getattr(m, f"{p_code.lower()}_passed", True):
-                    failed_p.append(p_code)
-
-            rec_text = "Email Pembinaan DSMM" if m.compliance_status == "PEMBINAAN_DSMM" else "Surat Teguran Tertulis"
+            failed_p = _failed_params(m)
+            rec_text = "Menunggu penetapan"
 
             vals = [
                 m.bank.Bank_ID,
                 f"{m.bank.Masked_Alias}\n({bank_name})",
-                f"{m.composite_score:.2f}%",
+                f"{_score(m):.2f}%",
                 ", ".join(failed_p) if failed_p else "-",
                 rec_text,
             ]
@@ -597,17 +592,18 @@ def generate_memo_docx(
 def generate_attachments_xlsx(db: Session, masked: bool = False) -> io.BytesIO:
     """
     Menghasilkan file Excel (.xlsx) multi-sheet yang memuat 3 lampiran resmi:
-    - Sheet 1: Lampiran 1 - Sebelum Threshold (Capaian Mentah B1-B8 + OM)
+    - Sheet 1: Lampiran 1 - Sebelum Threshold (Capaian Mentah B1-B8)
     - Sheet 2: Lampiran 2 - Setelah Threshold (Skor Terbobot & Komposit)
     - Sheet 3: Lampiran 3 - Tindak Lanjut (Status Kepatuhan & Rekomendasi Sanksi/Pembinaan)
     """
-    period = db.query(EvaluationPeriod).order_by(EvaluationPeriod.id.desc()).first()
+    period = get_active_period(db)
     triwulan_str = period.Triwulan if period else "2026-Q2"
     stage_str = period.Active_Threshold_Stage if period else "EARLY"
 
     matrices = (
         db.query(BankScoreMatrix)
         .join(MasterBank)
+        .filter(BankScoreMatrix.period_id == period.id)
         .order_by(MasterBank.Bank_ID.asc())
         .all()
     )
@@ -615,6 +611,7 @@ def generate_attachments_xlsx(db: Session, masked: bool = False) -> io.BytesIO:
     tickets = (
         db.query(FindingTicket)
         .join(MasterBank)
+        .filter(FindingTicket.period_id == period.id)
         .order_by(FindingTicket.Finding_ID.asc())
         .all()
     )
@@ -681,27 +678,17 @@ def generate_attachments_xlsx(db: Session, masked: bool = False) -> io.BytesIO:
 
     for row_idx, m in enumerate(matrices, start=6):
         bank_name = m.bank.Masked_Alias if masked else m.bank.Nama_Resmi_Bank
-        raw_vals = [
-            m.b1_raw, m.b2_raw, m.b3_raw, m.b4_raw, m.b5_raw,
-            m.b6_raw, m.b7a_raw, m.b7b_raw, m.b8_raw
-        ]
-        avg_puva = sum(raw_vals) / len(raw_vals) if raw_vals else 0.0
+        raw_vals = [getattr(m, f"{c.lower()}_raw") for c in PUVA_CODES_DOC]
+        known = [v for v in raw_vals if v is not None]
+        avg_puva = sum(known) / len(known) if known else None
 
         vals = [
             row_idx - 5,
             m.bank.Bank_ID,
             f"{m.bank.Masked_Alias} - {bank_name}" if not masked else m.bank.Masked_Alias,
             m.bank.Kelompok_KBMI,
-            m.b1_raw / 100.0,
-            m.b2_raw / 100.0,
-            m.b3_raw / 100.0,
-            m.b4_raw / 100.0,
-            m.b5_raw / 100.0,
-            m.b6_raw / 100.0,
-            m.b7a_raw / 100.0,
-            m.b7b_raw / 100.0,
-            m.b8_raw / 100.0,
-            avg_puva / 100.0,
+            *[(v / 100.0 if v is not None else "Belum ada data") for v in raw_vals],
+            avg_puva / 100.0 if avg_puva is not None else "-",
         ]
 
         for col_idx, val in enumerate(vals, start=1):
@@ -741,14 +728,13 @@ def generate_attachments_xlsx(db: Session, masked: bool = False) -> io.BytesIO:
     ws2["A2"].font = font_title
 
     ws2.merge_cells("A3:Q3")
-    ws2["A3"] = f"Tahap Threshold: {stage_str} STATE | Bobot Maksimal: PUVA 60.0% + Operasi Moneter (OM) 40.0% = Komposit 100.0%"
+    ws2["A3"] = f"Tahap Threshold: {stage_str} STATE | Bobot Maksimal: PUVA 60.0% (komponen Operasi Moneter tidak dievaluasi)"
     ws2["A3"].font = font_subtitle
 
     headers_l2 = [
         "No", "Bank ID", "Nama Dealer Utama",
         "B1 (2.5%)", "B2 (2.5%)", "B3 (2.5%)", "B4 (7.5%)", "B5 (2.5%)",
-        "B6 (7.5%)", "B7a (20%)", "B7b (5%)", "B8 (10%)", "PUVA (60%)",
-        "OM1 (15%)", "OM2 (20%)", "OM3 (5%)", "Komposit (100%)",
+        "B6 (7.5%)", "B7a (20%)", "B7b (5%)", "B8 (10%)", "Skor PUVA (60%)",
     ]
 
     for col_idx, h_text in enumerate(headers_l2, start=1):
@@ -765,20 +751,8 @@ def generate_attachments_xlsx(db: Session, masked: bool = False) -> io.BytesIO:
             row_idx - 5,
             m.bank.Bank_ID,
             f"{m.bank.Masked_Alias} - {bank_name}" if not masked else m.bank.Masked_Alias,
-            m.b1_score / 100.0,
-            m.b2_score / 100.0,
-            m.b3_score / 100.0,
-            m.b4_score / 100.0,
-            m.b5_score / 100.0,
-            m.b6_score / 100.0,
-            m.b7a_score / 100.0,
-            m.b7b_score / 100.0,
-            m.b8_score / 100.0,
-            m.total_puva_score / 100.0,
-            m.om1_score / 100.0,
-            m.om2_score / 100.0,
-            m.om3_score / 100.0,
-            m.composite_score / 100.0,
+            *[(getattr(m, f"{c.lower()}_score") or 0.0) / 100.0 for c in PUVA_CODES_DOC],
+            _score(m) / 100.0,
         ]
 
         for col_idx, val in enumerate(vals, start=1):
@@ -833,12 +807,12 @@ def generate_attachments_xlsx(db: Session, masked: bool = False) -> io.BytesIO:
     ws3["A2"].font = font_title
 
     ws3.merge_cells("A3:I3")
-    ws3["A3"] = "Rujukan Tindak Lanjut: Skor 100% (Lulus Penuh) | 90% s.d. <100% (Email Pembinaan DSMM) | <90% (Sanksi Administratif Teguran Tertulis)"
+    ws3["A3"] = "Rujukan: Skor PUVA maks 60%. " + TINDAK_LANJUT_PENDING
     ws3["A3"].font = font_subtitle
 
     headers_l3 = [
         "No", "Bank ID", "Nama Dealer Utama", "KBMI",
-        "Skor Komposit", "Status Kepatuhan", "Parameter Perhatian",
+        "Skor PUVA (maks 60%)", "Status Kepatuhan", "Parameter Tidak Terpenuhi",
         "Tiket Finding Sanggahan", "Rekomendasi Tindak Lanjut",
     ]
 
@@ -854,27 +828,24 @@ def generate_attachments_xlsx(db: Session, masked: bool = False) -> io.BytesIO:
         bank_name = m.bank.Masked_Alias if masked else m.bank.Nama_Resmi_Bank
 
         # Parameter yang gugur
-        failed_params = []
-        for p_code in ["B1", "B2", "B3", "B4", "B5", "B6", "B7a", "B7b", "B8"]:
-            if not getattr(m, f"{p_code.lower()}_passed", True):
-                failed_params.append(p_code)
+        failed_params = _failed_params(m)
 
         bank_tickets = tickets_by_bank.get(m.Bank_ID, [])
         ticket_str = ", ".join([f"{t.Finding_ID} ({t.BI_Decision_Status})" for t in bank_tickets]) if bank_tickets else "-"
 
         if m.compliance_status == "MEMENUHI":
-            tindak_lanjut = "Lulus Penuh (Memenuhi Seluruh Kewajiban DU PUVA)"
-        elif m.compliance_status == "PEMBINAAN_DSMM":
-            tindak_lanjut = "Penyampaian Surat / Email Pembinaan oleh DSMM"
+            tindak_lanjut = "Memenuhi seluruh kewajiban DU PUVA"
+        elif m.compliance_status == "TIDAK_MEMENUHI":
+            tindak_lanjut = "Menunggu penetapan tindak lanjut"
         else:
-            tindak_lanjut = "Penerbitan Surat Sanksi Administratif Teguran Tertulis oleh DSMM"
+            tindak_lanjut = "Data belum lengkap: " + ", ".join(_missing_params(m))
 
         vals = [
             row_idx - 5,
             m.bank.Bank_ID,
             f"{m.bank.Masked_Alias} - {bank_name}" if not masked else m.bank.Masked_Alias,
             m.bank.Kelompok_KBMI,
-            m.composite_score / 100.0,
+            _score(m) / 100.0,
             m.compliance_status,
             ", ".join(failed_params) if failed_params else "Nihil (Lolos Semua)",
             ticket_str,
@@ -902,7 +873,7 @@ def generate_attachments_xlsx(db: Session, masked: bool = False) -> io.BytesIO:
                 if val == "MEMENUHI":
                     cell.font = font_pass
                     cell.fill = light_emerald_fill
-                elif val == "PEMBINAAN_DSMM":
+                elif val == "DATA_BELUM_LENGKAP":
                     cell.font = font_amber
                     cell.fill = light_amber_fill
                 else:
@@ -941,13 +912,14 @@ def get_memo_preview_data(db: Session, memo_type: str = "m02", masked: bool = Fa
     pada Live Preview di UI sebelum diunduh dalam format .docx atau .xlsx.
     """
     memo_type = memo_type.lower()
-    period = db.query(EvaluationPeriod).order_by(EvaluationPeriod.id.desc()).first()
+    period = get_active_period(db)
     triwulan_str = period.Triwulan if period else "2026-Q2"
     stage_str = period.Active_Threshold_Stage if period else "EARLY"
 
     matrices = (
         db.query(BankScoreMatrix)
         .join(MasterBank)
+        .filter(BankScoreMatrix.period_id == period.id)
         .order_by(MasterBank.Bank_ID.asc())
         .all()
     )
@@ -955,13 +927,14 @@ def get_memo_preview_data(db: Session, memo_type: str = "m02", masked: bool = Fa
     tickets = (
         db.query(FindingTicket)
         .join(MasterBank)
+        .filter(FindingTicket.period_id == period.id)
         .order_by(FindingTicket.Finding_ID.asc())
         .all()
     )
 
     full_pass_banks = [m for m in matrices if m.compliance_status == "MEMENUHI"]
-    pembinaan_banks = [m for m in matrices if m.compliance_status == "PEMBINAAN_DSMM"]
-    sanksi_banks = [m for m in matrices if m.compliance_status == "SANKSI_TEGURAN"]
+    tidak_memenuhi_banks = [m for m in matrices if m.compliance_status == "TIDAK_MEMENUHI"]
+    belum_lengkap_banks = [m for m in matrices if m.compliance_status == "DATA_BELUM_LENGKAP"]
 
     if memo_type == "m02":
         return {
@@ -977,17 +950,16 @@ def get_memo_preview_data(db: Session, memo_type: str = "m02", masked: bool = Fa
             "period": triwulan_str,
             "stage": stage_str,
             "default_narration": (
-                f"Berdasarkan hasil kalkulasi Smart Rule Engine atas 5 sumber data primer (Bloomberg, SPPA Antasena, "
-                f"Survey Counterparty Line, HARTIS, dan DS Antasena) untuk periode {triwulan_str} (60 hari kerja), "
-                f"tercatat {len(full_pass_banks)} bank memenuhi seluruh kewajiban (100%), {len(pembinaan_banks)} bank masuk "
-                f"kategori pembinaan DSMM (skor 90% s.d. <100%), dan {len(sanksi_banks)} bank dikenakan sanksi administratif "
-                f"teguran tertulis (skor <90%). Seluruh tiket sanggahan telah diverifikasi melalui AI Evidence Checker berbasis PADG No. 23/2024."
+                f"Berdasarkan hasil perhitungan rule engine PADG No. 23 Tahun 2024 untuk periode {triwulan_str}, "
+                f"tercatat {len(full_pass_banks)} bank memenuhi seluruh kewajiban PUVA (skor 60%), "
+                f"{len(tidak_memenuhi_banks)} bank tidak memenuhi minimal satu kewajiban, dan {len(belum_lengkap_banks)} bank "
+                f"dengan data evaluasi yang belum lengkap. {TINDAK_LANJUT_PENDING}"
             ),
             "summary_stats": {
                 "total_banks": len(matrices),
                 "full_pass": len(full_pass_banks),
-                "pembinaan": len(pembinaan_banks),
-                "sanksi": len(sanksi_banks),
+                "tidak_memenuhi": len(tidak_memenuhi_banks),
+                "data_belum_lengkap": len(belum_lengkap_banks),
             },
             "findings": [
                 {
@@ -1019,26 +991,26 @@ def get_memo_preview_data(db: Session, memo_type: str = "m02", masked: bool = Fa
             "default_narration": (
                 f"Menindaklanjuti ketentuan Pasal 28 PADG No. 23 Tahun 2024, Departemen Pengembangan Pasar Keuangan (DPPK) "
                 f"menyampaikan hasil akhir evaluasi 21 Dealer Utama PUVA periode {triwulan_str} pasca-rekonsiliasi. "
-                f"Hasil evaluasi memuat daftar bank yang memenuhi kewajiban, bank yang memerlukan email pembinaan DSMM, "
-                f"serta bank yang dikenakan sanksi administratif teguran tertulis."
+                f"Hasil evaluasi memuat daftar bank yang memenuhi seluruh kewajiban PUVA dan bank yang tidak memenuhi "
+                f"minimal satu kewajiban. {TINDAK_LANJUT_PENDING}"
             ),
             "categories": {
                 "lulus": [m.bank.Masked_Alias if masked else m.bank.Nama_Resmi_Bank for m in full_pass_banks],
-                "pembinaan": [
+                "tidak_memenuhi": [
                     {
                         "bank_name": m.bank.Masked_Alias if masked else m.bank.Nama_Resmi_Bank,
-                        "score": m.composite_score,
-                        "notes": "Di bawah ambang batas B2 (SRBI) / B3 (OIS) / B4 (Line Repo)",
+                        "score": _score(m),
+                        "notes": "Tidak memenuhi: " + ", ".join(_failed_params(m)),
                     }
-                    for m in pembinaan_banks
+                    for m in tidak_memenuhi_banks
                 ],
-                "sanksi": [
+                "data_belum_lengkap": [
                     {
                         "bank_name": m.bank.Masked_Alias if masked else m.bank.Nama_Resmi_Bank,
-                        "score": m.composite_score,
-                        "notes": "Pelanggaran tenor transaksi Repo sekunder (< 14 hari) pada B7a",
+                        "score": _score(m),
+                        "notes": "Belum ada data: " + ", ".join(_missing_params(m)),
                     }
-                    for m in sanksi_banks
+                    for m in belum_lengkap_banks
                 ],
             },
         }

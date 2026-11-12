@@ -50,8 +50,8 @@ export const BankPortalView: React.FC = () => {
 
   // Parameter yang di bawah threshold
   const failedParams = Object.entries(bankData.passed_flags)
-    .filter(([key, passed]) => !passed && key.startsWith("b"))
-    .map(([key]) => key.toUpperCase())
+    .filter(([, passed]) => passed === false)
+    .map(([key]) => key)
 
   // Handler pengiriman email EWS otomatis
   const handleSendEwsReminder = async () => {
@@ -217,7 +217,7 @@ export const BankPortalView: React.FC = () => {
               <>
                 <AlertTriangle className="w-6 h-6 text-rose-600" />
                 <span className="text-lg font-bold text-rose-700">
-                  {bankData.compliance_status === "PEMBINAAN_DSMM" ? "PEMBINAAN DSMM" : "SANKSI TEGURAN"}
+                  {bankData.compliance_status === "DATA_BELUM_LENGKAP" ? "DATA BELUM LENGKAP" : "TIDAK MEMENUHI"}
                 </span>
               </>
             )}
@@ -241,14 +241,11 @@ export const BankPortalView: React.FC = () => {
 
         <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs">
           <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block">
-            Simulasi Komposit Total
+            Parameter Tidak Terpenuhi
           </span>
-          <div className="text-2xl font-black text-emerald-700 mt-1">
-            {bankData.composite_score.toFixed(1)}% <span className="text-xs font-normal text-slate-400">/ 100%</span>
+          <div className="text-2xl font-black text-rose-700 mt-1">
+            {failedParams.length} <span className="text-xs font-normal text-slate-400">/ 9 parameter</span>
           </div>
-          <span className="text-xs text-slate-500 mt-1 block">
-            PUVA {bankData.total_puva_score.toFixed(1)}% + Operasi Moneter {bankData.total_om_score.toFixed(1)}%
-          </span>
         </div>
       </div>
 
@@ -261,8 +258,8 @@ export const BankPortalView: React.FC = () => {
 
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
           {["B1", "B2", "B3", "B4", "B5", "B6", "B7a", "B7b", "B8"].map((code) => {
-            const raw = bankData.raw_metrics[code] || 0
-            const passed = bankData.passed_flags[code] || false
+            const raw = bankData.raw_metrics[code] ?? 0
+            const passed = bankData.passed_flags[code] ?? false
             const score = bankData.weighted_scores[code] || 0
 
             return (

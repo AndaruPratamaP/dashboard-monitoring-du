@@ -58,7 +58,8 @@ export const ExecutiveMatrixView: React.FC = () => {
   // 1. KPI Calculations
   const totalBanks = matrix.length
   const fullCompliance = matrix.filter((m) => m.compliance_status === "MEMENUHI").length
-  const attentionCount = totalBanks - fullCompliance
+  const attentionCount = matrix.filter((m) => m.compliance_status === "TIDAK_MEMENUHI").length
+  const incompleteCount = matrix.filter((m) => m.compliance_status === "DATA_BELUM_LENGKAP").length
 
   const puvaScores = matrix.map((m) => m.total_puva_score || 0)
   const averagePuva = puvaScores.length > 0 ? (puvaScores.reduce((a, b) => a + b, 0) / puvaScores.length).toFixed(1) : "0"
@@ -90,7 +91,7 @@ export const ExecutiveMatrixView: React.FC = () => {
         let valA: any = a[sortField as keyof BankScoreMatrixItem]
         let valB: any = b[sortField as keyof BankScoreMatrixItem]
 
-        if (sortField === "composite_score" || sortField === "total_puva_score") {
+        if (sortField === "total_puva_score") {
           valA = Number(valA || 0)
           valB = Number(valB || 0)
         } else {
@@ -105,8 +106,8 @@ export const ExecutiveMatrixView: React.FC = () => {
   }, [matrix, searchQuery, selectedKbmi, selectedStatus, sortField, sortAsc])
 
   const handleCellClick = (item: BankScoreMatrixItem, paramCode: string) => {
-    const rawRate = item.raw_metrics[paramCode] || 0
-    const isPassed = item.passed_flags[paramCode] || false
+    const rawRate = item.raw_metrics[paramCode] ?? null
+    const isPassed = item.passed_flags[paramCode] ?? null
     const score = item.weighted_scores[paramCode] || 0
     const paramDef = PUVA_PARAMS.find((p) => p.code === paramCode)
     const weight = paramDef ? paramDef.weight : 0
@@ -159,7 +160,7 @@ export const ExecutiveMatrixView: React.FC = () => {
             <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block">
               Total Dealer Utama
             </span>
-            <div className="text-2xl font-black text-slate-900 mt-1">21 Bank</div>
+            <div className="text-2xl font-black text-slate-900 mt-1">{totalBanks} Bank</div>
           </div>
           <div className="p-2.5 bg-slate-100 text-slate-600 rounded-xl">
             <Building2 className="w-5 h-5" />
@@ -185,11 +186,14 @@ export const ExecutiveMatrixView: React.FC = () => {
         <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs flex items-start justify-between">
           <div>
             <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block">
-              Perlu Klarifikasi
+              Tidak Memenuhi
             </span>
             <div className="text-2xl font-black text-rose-600 mt-1">
               {attentionCount} Bank
             </div>
+            {incompleteCount > 0 && (
+              <span className="text-[10px] text-slate-500">{incompleteCount} bank data belum lengkap</span>
+            )}
           </div>
           <div className="p-2.5 bg-rose-50 text-rose-600 rounded-xl border border-rose-200">
             <AlertTriangle className="w-5 h-5" />
@@ -252,9 +256,9 @@ export const ExecutiveMatrixView: React.FC = () => {
               className="bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-medium text-slate-700 focus:outline-none cursor-pointer"
             >
               <option value="ALL">Semua Status</option>
-              <option value="MEMENUHI">Memenuhi (100%)</option>
-              <option value="PEMBINAAN_DSMM">Pembinaan DSMM</option>
-              <option value="SANKSI_TEGURAN">Sanksi Teguran</option>
+              <option value="MEMENUHI">Memenuhi (60%)</option>
+              <option value="TIDAK_MEMENUHI">Tidak Memenuhi</option>
+              <option value="DATA_BELUM_LENGKAP">Data Belum Lengkap</option>
             </select>
           </div>
         </div>
@@ -292,13 +296,10 @@ export const ExecutiveMatrixView: React.FC = () => {
                   )
                 })}
                 <th className="p-3 font-bold text-[11px] text-center min-w-[90px] border-l border-slate-800 bg-slate-900 text-emerald-400">
-                  Subtotal PUVA (60%)
-                </th>
-                <th className="p-3 font-bold text-[11px] text-center min-w-[95px] border-l border-slate-800 bg-slate-900 text-white">
-                  Komposit (100%)
+                  Skor PUVA (maks 60%)
                 </th>
                 <th className="p-3 font-semibold text-[11px] text-center min-w-[130px] border-l border-slate-800">
-                  Tindak Lanjut BI
+                  Status
                 </th>
                 <th className="p-3 font-semibold text-[11px] text-center w-16 border-l border-slate-800">
                   Aksi
@@ -311,8 +312,8 @@ export const ExecutiveMatrixView: React.FC = () => {
               {filteredMatrix.map((item, idx) => {
                 const displayName = isMasked ? item.masked_alias : item.nama_resmi_bank
                 const isAllPass = item.compliance_status === "MEMENUHI"
-                const isWarning = item.compliance_status === "PEMBINAAN_DSMM"
-                const isSevere = item.compliance_status === "SANKSI_TEGURAN"
+                const isWarning = item.compliance_status === "DATA_BELUM_LENGKAP"
+                const isSevere = item.compliance_status === "TIDAK_MEMENUHI"
 
                 return (
                   <tr
@@ -349,9 +350,22 @@ export const ExecutiveMatrixView: React.FC = () => {
 
                     {/* 9 PUVA Parameter Cells */}
                     {PUVA_PARAMS.map((p) => {
-                      const raw = item.raw_metrics[p.code] ?? 0
-                      const passed = item.passed_flags[p.code] ?? false
+                      const raw = item.raw_metrics[p.code]
+                      const passed = item.passed_flags[p.code]
                       const score = item.weighted_scores[p.code] ?? 0
+
+                      if (raw === null || raw === undefined) {
+                        return (
+                          <td key={p.code} className="p-1.5 text-center border-l border-slate-100">
+                            <div
+                              title={`${p.code}: sumber data belum diunggah untuk periode ini`}
+                              className="w-full py-1.5 px-1 rounded-lg border border-dashed border-slate-200 text-slate-400 text-[11px]"
+                            >
+                              —
+                            </div>
+                          </td>
+                        )
+                      }
 
                       return (
                         <td
@@ -395,28 +409,21 @@ export const ExecutiveMatrixView: React.FC = () => {
                       </div>
                     </td>
 
-                    {/* Komposit (100%) */}
-                    <td className="p-2.5 text-center border-l border-slate-200 bg-slate-50/50">
-                      <div className="font-extrabold text-xs text-slate-900 font-mono">
-                        {item.composite_score.toFixed(1)}%
-                      </div>
-                    </td>
-
                     {/* Status & Tindak Lanjut BI */}
                     <td className="p-2.5 text-center border-l border-slate-200">
                       {isAllPass && (
                         <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
-                          Memenuhi Penuh
+                          Memenuhi
                         </span>
                       )}
                       {isWarning && (
                         <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300">
-                          Pembinaan DSMM
+                          Data Belum Lengkap
                         </span>
                       )}
                       {isSevere && (
                         <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-300">
-                          Sanksi Teguran
+                          Tidak Memenuhi
                         </span>
                       )}
                     </td>

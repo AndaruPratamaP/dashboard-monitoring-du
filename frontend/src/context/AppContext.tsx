@@ -1,6 +1,6 @@
 "use client"
 
-import React, { createContext, useContext, useState, useEffect, useCallback } from "react"
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from "react"
 import {
   ThresholdStage,
   RoleMode,
@@ -8,6 +8,7 @@ import {
   BankScoreMatrixItem,
   FindingTicketItem,
   DrillDownSelection,
+  EvaluationPeriodInfo,
 } from "@/types"
 
 interface AppContextType {
@@ -19,6 +20,9 @@ interface AppContextType {
 
   selectedPeriod: string
   setSelectedPeriod: (period: string) => void
+  periods: EvaluationPeriodInfo[]
+  activePeriod: EvaluationPeriodInfo | null
+  changePeriod: (periodId: number) => Promise<void>
 
   selectedStage: ThresholdStage
   changeStage: (stage: ThresholdStage) => Promise<void>
@@ -53,7 +57,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [activeMenu, setActiveMenu] = useState<string>("matrix")
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false)
 
-  const [selectedPeriod, setSelectedPeriod] = useState<string>("2026-Q2")
+  const [selectedPeriod, setSelectedPeriod] = useState<string>("")
+  const [periods, setPeriods] = useState<EvaluationPeriodInfo[]>([])
+  const activePeriod = periods.find((p) => p.is_active) || null
   const [selectedStage, setSelectedStage] = useState<ThresholdStage>("EARLY")
   const [isMasked, setIsMasked] = useState<boolean>(true) // Default true: Mode Alias (Bank A - Bank U)
   const [roleMode, setRoleMode] = useState<RoleMode>("BI")
@@ -81,14 +87,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setIsDrawerOpen(false)
   }
 
+  // Spinner layar penuh hanya untuk muatan pertama; refresh berikutnya tidak me-unmount view
+  // (agar hasil ETL / umpan balik keputusan di view tetap terlihat).
+  const hasLoadedRef = useRef(false)
+
   const fetchData = useCallback(async () => {
-    setIsLoading(true)
+    if (!hasLoadedRef.current) setIsLoading(true)
     try {
-      const [matrixRes, banksRes, findingsRes] = await Promise.all([
+      const [matrixRes, banksRes, findingsRes, periodsRes] = await Promise.all([
         fetch(`/api/matrix?stage=${selectedStage}`),
         fetch("/api/banks"),
         fetch("/api/findings"),
+        fetch("/api/periods"),
       ])
+      if (periodsRes.ok) {
+        const periodsJson: EvaluationPeriodInfo[] = await periodsRes.json()
+        setPeriods(periodsJson)
+        const active = periodsJson.find((p) => p.is_active)
+        if (active) {
+          setSelectedPeriod(active.triwulan)
+          if (active.active_threshold_stage && active.active_threshold_stage !== selectedStage) {
+            setSelectedStage(active.active_threshold_stage)
+          }
+        }
+      }
 
       if (matrixRes.ok) {
         const matrixJson = await matrixRes.json()
@@ -105,6 +127,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } catch (err) {
       console.error("Gagal memuat data dari API backend:", err)
     } finally {
+      hasLoadedRef.current = true
       setIsLoading(false)
     }
   }, [selectedStage])
@@ -112,6 +135,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     fetchData()
   }, [fetchData])
+
+  const changePeriod = async (periodId: number) => {
+    try {
+      const res = await fetch(`/api/periods/${periodId}/activate`, { method: "POST" })
+      if (res.ok) {
+        await fetchData()
+      }
+    } catch (err) {
+      console.error("Gagal mengganti periode evaluasi:", err)
+    }
+  }
 
   const changeStage = async (stage: ThresholdStage) => {
     if (stage === selectedStage) return
@@ -150,6 +184,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         toggleSidebar,
         selectedPeriod,
         setSelectedPeriod,
+        periods,
+        activePeriod,
+        changePeriod,
         selectedStage,
         changeStage,
         isMasked,

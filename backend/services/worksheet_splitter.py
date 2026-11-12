@@ -12,7 +12,7 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 from sqlalchemy.orm import Session
 
-from models import MasterBank, EvaluationPeriod, BankScoreMatrix, FindingTicket
+from models import get_active_period, MasterBank, EvaluationPeriod, BankScoreMatrix, FindingTicket
 from services.rule_engine import THRESHOLDS, WEIGHTS, PARAMETER_NAMES, PARAMETER_DETAILS
 
 
@@ -30,16 +30,18 @@ def generate_bank_worksheet(db: Session, bank_id: str) -> io.BytesIO:
     if not bank:
         raise ValueError(f"Bank dengan ID '{bank_id}' tidak ditemukan.")
 
-    period = db.query(EvaluationPeriod).order_by(EvaluationPeriod.id.desc()).first()
+    period = get_active_period(db)
     stage = period.Active_Threshold_Stage if period else "EARLY"
     triwulan = period.Triwulan if period else "2026-Q2"
 
     matrix = db.query(BankScoreMatrix).filter(
-        BankScoreMatrix.Bank_ID == bank.Bank_ID
-    ).order_by(BankScoreMatrix.id.desc()).first()
+        BankScoreMatrix.Bank_ID == bank.Bank_ID,
+        BankScoreMatrix.period_id == (period.id if period else None),
+    ).first()
 
     tickets = db.query(FindingTicket).filter(
-        FindingTicket.Bank_ID == bank.Bank_ID
+        FindingTicket.Bank_ID == bank.Bank_ID,
+        FindingTicket.period_id == (period.id if period else None),
     ).all()
 
     # Inisialisasi Workbook openpyxl
@@ -120,9 +122,9 @@ def generate_bank_worksheet(db: Session, bank_id: str) -> io.BytesIO:
     stage_thresholds = THRESHOLDS.get(stage, THRESHOLDS["EARLY"])
 
     for code, raw_col, pass_col, score_col in puva_keys:
-        raw_val = getattr(matrix, raw_col, 0.0) if matrix else 0.0
-        is_pass = getattr(matrix, pass_col, False) if matrix else False
-        score_val = getattr(matrix, score_col, 0.0) if matrix else 0.0
+        raw_val = getattr(matrix, raw_col, None) if matrix else None
+        is_pass = getattr(matrix, pass_col, None) if matrix else None
+        score_val = (getattr(matrix, score_col, 0.0) or 0.0) if matrix else 0.0
         th_val = stage_thresholds.get(code, 80.0)
         weight_val = WEIGHTS.get(code, 0.0)
 
@@ -130,15 +132,17 @@ def generate_bank_worksheet(db: Session, bank_id: str) -> io.BytesIO:
         ws1.cell(row=curr_row, column=2, value=PARAMETER_NAMES.get(code, code))
         ws1.cell(row=curr_row, column=3, value=PARAMETER_DETAILS.get(code, "-"))
         
-        c_raw = ws1.cell(row=curr_row, column=4, value=f"{raw_val:.2f}%")
+        c_raw = ws1.cell(row=curr_row, column=4, value=f"{raw_val:.2f}%" if raw_val is not None else "Belum ada data")
         c_raw.alignment = Alignment(horizontal="right")
 
         c_th = ws1.cell(row=curr_row, column=5, value=f">= {th_val:.1f}%")
         c_th.alignment = Alignment(horizontal="center")
 
-        c_status = ws1.cell(row=curr_row, column=6, value="MEMENUHI" if is_pass else "TEMUAN")
+        c_status = ws1.cell(row=curr_row, column=6, value="MEMENUHI" if is_pass else ("BELUM ADA DATA" if is_pass is None else "TEMUAN"))
         c_status.alignment = Alignment(horizontal="center")
-        if is_pass:
+        if is_pass is None:
+            c_status.font = font_regular
+        elif is_pass:
             c_status.fill = light_emerald_fill
             c_status.font = font_pass
         else:
@@ -168,78 +172,24 @@ def generate_bank_worksheet(db: Session, bank_id: str) -> io.BytesIO:
         ws1.cell(row=curr_row, column=col_idx).fill = gray_fill
     curr_row += 2
 
-    # Tabel Penilaian Komponen OM (40%)
-    ws1.cell(row=curr_row, column=1, value="B. KOMPONEN OPERASI MONETER (OM - MAKS 40%)").font = font_bold
+    # Kesimpulan (komponen Operasi Moneter tidak termasuk ruang lingkup evaluasi DPPK)
+    compliance = getattr(matrix, "compliance_status", "DATA_BELUM_LENGKAP") if matrix else "DATA_BELUM_LENGKAP"
+
+    ws1.cell(row=curr_row, column=1, value="B. KESIMPULAN EVALUASI").font = font_bold
     curr_row += 1
 
-    for col_idx, h_text in enumerate(headers_puva, start=1):
-        c = ws1.cell(row=curr_row, column=col_idx, value=h_text)
-        c.fill = navy_fill
-        c.font = font_header
-        c.alignment = Alignment(horizontal="center", vertical="center")
-    curr_row += 1
-
-    om_keys = [
-        ("OM1", "om1_raw", "om1_passed", "om1_score"),
-        ("OM2", "om2_raw", "om2_passed", "om2_score"),
-        ("OM3", "om3_raw", "om3_passed", "om3_score"),
-    ]
-
-    for code, raw_col, pass_col, score_col in om_keys:
-        raw_val = getattr(matrix, raw_col, 100.0) if matrix else 100.0
-        is_pass = getattr(matrix, pass_col, True) if matrix else True
-        score_val = getattr(matrix, score_col, 0.0) if matrix else 0.0
-        th_val = stage_thresholds.get(code, 60.0)
-        weight_val = WEIGHTS.get(code, 0.0)
-
-        ws1.cell(row=curr_row, column=1, value=code).alignment = Alignment(horizontal="center")
-        ws1.cell(row=curr_row, column=2, value=PARAMETER_NAMES.get(code, code))
-        ws1.cell(row=curr_row, column=3, value=PARAMETER_DETAILS.get(code, "-"))
-        ws1.cell(row=curr_row, column=4, value=f"{raw_val:.2f}%").alignment = Alignment(horizontal="right")
-        ws1.cell(row=curr_row, column=5, value=f">= {th_val:.1f}%").alignment = Alignment(horizontal="center")
-        
-        c_status = ws1.cell(row=curr_row, column=6, value="MEMENUHI" if is_pass else "TEMUAN")
-        c_status.alignment = Alignment(horizontal="center")
-        c_status.font = font_pass if is_pass else font_fail
-        
-        ws1.cell(row=curr_row, column=7, value=f"{weight_val:.1f}%").alignment = Alignment(horizontal="right")
-        ws1.cell(row=curr_row, column=8, value=f"{score_val:.2f}%").alignment = Alignment(horizontal="right")
-
-        for col_idx in range(1, 9):
-            ws1.cell(row=curr_row, column=col_idx).border = cell_border
-        curr_row += 1
-
-    # Subtotal OM
-    om_total = getattr(matrix, "total_om_score", 40.0) if matrix else 40.0
-    ws1.cell(row=curr_row, column=2, value="SUBTOTAL KOMPONEN OM").font = font_bold
-    ws1.cell(row=curr_row, column=7, value="40.0%").font = font_bold
-    c_tot_om = ws1.cell(row=curr_row, column=8, value=f"{om_total:.2f}%")
-    c_tot_om.font = font_bold
-    c_tot_om.alignment = Alignment(horizontal="right")
-    for col_idx in range(1, 9):
-        ws1.cell(row=curr_row, column=col_idx).border = cell_border
-        ws1.cell(row=curr_row, column=col_idx).fill = gray_fill
-    curr_row += 2
-
-    # Ringkasan Total & Kepatuhan
-    comp_score = getattr(matrix, "composite_score", 100.0) if matrix else 100.0
-    compliance = getattr(matrix, "compliance_status", "MEMENUHI") if matrix else "MEMENUHI"
-
-    ws1.cell(row=curr_row, column=1, value="C. KESIMPULAN EVALUASI & TINDAK LANJUT").font = font_bold
-    curr_row += 1
-
-    ws1.cell(row=curr_row, column=1, value="Total Skor Komposit (100%):").font = font_bold
-    c_comp = ws1.cell(row=curr_row, column=2, value=f"{comp_score:.2f}%")
+    ws1.cell(row=curr_row, column=1, value="Skor PUVA (maks 60%):").font = font_bold
+    c_comp = ws1.cell(row=curr_row, column=2, value=f"{puva_total or 0.0:.2f}%")
     c_comp.font = Font(name="Calibri", size=12, bold=True, color="0F172A")
 
     curr_row += 1
-    ws1.cell(row=curr_row, column=1, value="Status Evaluasi Akhir:").font = font_bold
+    ws1.cell(row=curr_row, column=1, value="Status Evaluasi:").font = font_bold
     c_status_final = ws1.cell(row=curr_row, column=2, value=compliance)
     c_status_final.font = font_bold
     if compliance == "MEMENUHI":
         c_status_final.fill = light_emerald_fill
         c_status_final.font = font_pass
-    elif compliance == "PEMBINAAN_DSMM":
+    elif compliance == "DATA_BELUM_LENGKAP":
         c_status_final.fill = light_amber_fill
         c_status_final.font = Font(name="Calibri", size=11, bold=True, color="B45309")
     else:
@@ -248,12 +198,12 @@ def generate_bank_worksheet(db: Session, bank_id: str) -> io.BytesIO:
 
     curr_row += 1
     ws1.cell(row=curr_row, column=1, value="Tindak Lanjut BI:").font = font_bold
-    if comp_score >= 100.0:
-        action_text = "Memenuhi seluruh kewajiban Dealer Utama PUVA (Lulus Penuh)"
-    elif comp_score >= 90.0:
-        action_text = "Surat/Email Pembinaan oleh Departemen Surveilans & Manajemen Risiko (DSMM)"
+    if compliance == "MEMENUHI":
+        action_text = "Memenuhi seluruh kewajiban Dealer Utama PUVA"
+    elif compliance == "TIDAK_MEMENUHI":
+        action_text = "Menunggu penetapan tindak lanjut (aturan skor tanpa komponen OM)"
     else:
-        action_text = "Sanksi Administratif berupa Surat Teguran Tertulis"
+        action_text = "Menunggu kelengkapan data evaluasi"
     ws1.cell(row=curr_row, column=2, value=action_text).font = font_regular
 
     # Atur lebar kolom ws1

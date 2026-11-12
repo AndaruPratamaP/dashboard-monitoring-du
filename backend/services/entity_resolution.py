@@ -4,6 +4,7 @@ Memetakan berbagai sandi, ticker, dan variasi penulisan nama bank ke ID tunggal 
 """
 
 import re
+import json
 from typing import Optional, Dict, Any, List
 from sqlalchemy.orm import Session
 from models import MasterBank
@@ -35,6 +36,8 @@ class EntityResolver:
         self.by_sppa: Dict[str, MasterBank] = {}
         self.by_exact_name: Dict[str, MasterBank] = {}
         self.by_normalized_name: Dict[str, MasterBank] = {}
+        self.by_sandi: Dict[str, MasterBank] = {}
+        self.by_code: Dict[str, MasterBank] = {}  # Kode BBG + seluruh alias
 
         for b in self.banks:
             # 1. Bank ID
@@ -56,6 +59,26 @@ class EntityResolver:
             sppa_code = b.Kode_SPPA_Antasena.upper().strip()
             self.by_sppa[sppa_code] = b
 
+            # 4b. Sandi BI (002), Kode BBG (BRIJ), alias
+            if getattr(b, "Sandi_BI", None):
+                self.by_sandi[str(b.Sandi_BI).strip().zfill(3)] = b
+            codes = []
+            if getattr(b, "Kode_BBG", None):
+                codes.append(b.Kode_BBG)
+            if getattr(b, "Nama_Singkat", None):
+                codes.append(b.Nama_Singkat)
+            try:
+                codes.extend(json.loads(b.Aliases_JSON or "[]"))
+            except (ValueError, TypeError):
+                pass
+            for c in codes:
+                key = str(c).upper().strip()
+                if key:
+                    self.by_code[key] = b
+                    norm_alias = normalize_text(key)
+                    if norm_alias:
+                        self.by_normalized_name.setdefault(norm_alias, b)
+
             # 5. Nama Resmi & Normalisasi
             self.by_exact_name[b.Nama_Resmi_Bank.upper().strip()] = b
             norm_name = normalize_text(b.Nama_Resmi_Bank)
@@ -72,6 +95,17 @@ class EntityResolver:
         
         raw_val = str(identifier).strip()
         val_upper = raw_val.upper()
+        if not raw_val or val_upper in ("NAN", "NONE", "NULL"):
+            return None
+
+        # 0. Sandi BI: '002', '2', atau format DS Antasena '002 - BRI'
+        m = re.match(r"^(\d{1,3})(?:\s*-\s*.*)?$", raw_val)
+        if m and m.group(1).zfill(3) in self.by_sandi:
+            return self.by_sandi[m.group(1).zfill(3)]
+
+        # 0b. Kode BBG / alias eksak
+        if val_upper in self.by_code:
+            return self.by_code[val_upper]
 
         # 1. Cek langsung Bank ID
         if val_upper in self.by_id:
@@ -104,10 +138,16 @@ class EntityResolver:
         if norm_val in self.by_normalized_name:
             return self.by_normalized_name[norm_val]
 
-        # 7. Substring / Token matching fallback
-        for norm_bank_name, bank in self.by_normalized_name.items():
-            if norm_val and (norm_val in norm_bank_name or norm_bank_name in norm_val):
-                return bank
+        # 7. Token matching fallback: hanya diterima jika tepat SATU bank cocok
+        #    (mencegah salah petakan, mis. 'MANDIRI' vs 'SYARIAH MANDIRI').
+        if norm_val:
+            val_tokens = set(norm_val.split())
+            candidates = [
+                bank for norm_bank_name, bank in self.by_normalized_name.items()
+                if val_tokens and (val_tokens <= set(norm_bank_name.split()) or set(norm_bank_name.split()) <= val_tokens)
+            ]
+            if len(candidates) == 1:
+                return candidates[0]
 
         return None
 

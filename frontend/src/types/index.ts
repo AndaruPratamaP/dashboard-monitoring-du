@@ -1,12 +1,31 @@
 export type ThresholdStage = "EARLY" | "INTERMEDIATE" | "END_STATE"
 export type RoleMode = "BI" | "BANK_DU"
-export type ComplianceStatus = "MEMENUHI" | "PEMBINAAN_DSMM" | "SANKSI_TEGURAN"
+export type ComplianceStatus = "MEMENUHI" | "TIDAK_MEMENUHI" | "DATA_BELUM_LENGKAP"
+
+export const PUVA_CODES = ["B1", "B2", "B3", "B4", "B5", "B6", "B7a", "B7b", "B8"] as const
+export type PuvaCode = (typeof PUVA_CODES)[number]
+
+export interface EvaluationPeriodInfo {
+  id: number
+  tahun: number
+  triwulan: string
+  active_threshold_stage: ThresholdStage
+  is_active: boolean
+  is_snapshot_locked: boolean
+  is_sample_data: boolean
+  working_days_count: number
+  mm_ois_sessions_count: number
+}
 
 export interface MasterBank {
   bank_id: string
   masked_alias: string
   nama_resmi_bank: string
   kelompok_kbmi: string
+  nama_singkat?: string
+  sandi_bi?: string
+  kode_bbg?: string
+  no_urut_konfirmasi?: number
   kode_bloomberg: string
   kode_sppa_antasena: string
 }
@@ -25,61 +44,23 @@ export interface ParameterMetricDetail {
   target_days?: number
   valid_sessions?: number
   total_sessions?: number
+  rasio_penjualan_pct?: number | null
 }
 
 export interface BankScoreMatrixItem {
   bank_id: string
   masked_alias: string
   nama_resmi_bank: string
+  nama_singkat?: string
   kelompok_kbmi: string
-  raw_metrics: {
-    B1: number
-    B2: number
-    B3: number
-    B4: number
-    B5: number
-    B6: number
-    B7a: number
-    B7b: number
-    B8: number
-    OM1: number
-    OM2: number
-    OM3: number
-    [key: string]: number
-  }
-  passed_flags: {
-    B1: boolean
-    B2: boolean
-    B3: boolean
-    B4: boolean
-    B5: boolean
-    B6: boolean
-    B7a: boolean
-    B7b: boolean
-    B8: boolean
-    OM1: boolean
-    OM2: boolean
-    OM3: boolean
-    [key: string]: boolean
-  }
-  weighted_scores: {
-    B1: number
-    B2: number
-    B3: number
-    B4: number
-    B5: number
-    B6: number
-    B7a: number
-    B7b: number
-    B8: number
-    OM1: number
-    OM2: number
-    OM3: number
-    [key: string]: number
-  }
+  period?: string
+  /** null = sumber data parameter belum diunggah */
+  raw_metrics: Record<string, number | null>
+  /** null = belum ada data */
+  passed_flags: Record<string, boolean | null>
+  weighted_scores: Record<string, number | null>
   total_puva_score: number
-  total_om_score: number
-  composite_score: number
+  max_puva_score?: number
   compliance_status: ComplianceStatus
   detail_metrics?: {
     [paramCode: string]: ParameterMetricDetail
@@ -88,6 +69,8 @@ export interface BankScoreMatrixItem {
 
 export interface FailedTransactionItem {
   tanggal?: string
+  tenor_tidak_dikuotasi?: string[]
+  rasio_penjualan?: string
   platform?: string
   tenor?: string
   seri?: string
@@ -140,8 +123,8 @@ export interface DrillDownSelection {
   paramCode: string
   paramName: string
   paramDetail: string
-  rawRate: number
-  isPassed: boolean
+  rawRate: number | null
+  isPassed: boolean | null
   score: number
   weight: number
   threshold: number

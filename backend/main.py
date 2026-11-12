@@ -19,8 +19,8 @@ try:
 except ImportError:
     pass
 
-from database import engine, Base, get_db
-from models import MasterBank, EvaluationPeriod, BankScoreMatrix, FindingTicket, AuditTrail
+from database import engine, Base, get_db, ensure_schema
+from models import get_active_period, MasterBank, EvaluationPeriod, BankScoreMatrix, FindingTicket, AuditTrail
 from seed import seed_database, get_dataset_folder
 from services.entity_resolution import EntityResolver
 from services.rule_engine import (
@@ -31,9 +31,21 @@ from services.rule_engine import (
     calculate_puva_raw_metrics,
     evaluate_and_sync_database,
     compute_matrix_scores,
+    matrix_to_raw,
+    canonical_code,
+    parse_claim_percent,
+    PUVA_CODES,
+    MAX_PUVA_SCORE,
+    STATUS_MEMENUHI,
+    STATUS_TIDAK_MEMENUHI,
+    STATUS_DATA_BELUM_LENGKAP,
 )
+
+# Periode dataset sample sintetis (dipakai parser lama untuk B1-B5, B7 sampai parser data ril selesai)
+SAMPLE_PERIOD = "2026-Q2"
 from services.worksheet_splitter import generate_bank_worksheet
 from services.ai_reconciliation import analyze_dispute_with_ai
+from services.real_ingest import INGESTERS, SOURCES, IngestError, find_default_file, period_from_dates
 from services.doc_generator import (
     generate_memo_docx,
     generate_attachments_xlsx,
@@ -50,6 +62,7 @@ os.makedirs(UPLOADS_DIR, exist_ok=True)
 async def lifespan(app: FastAPI):
     # Buat tabel dan jalankan auto-seeder saat startup jika belum ada data
     Base.metadata.create_all(bind=engine)
+    ensure_schema()
     db = next(get_db())
     try:
         seed_database(db=db, force_reseed=False)
@@ -74,6 +87,28 @@ app.add_middleware(
 )
 
 
+def ensure_period_unlocked(db: Session, period_id: Optional[int] = None) -> Optional[EvaluationPeriod]:
+    """
+    Tolak perubahan data jika snapshot periode evaluasi sudah dikunci.
+    Mengembalikan periode yang dimaksud (atau periode terbaru bila period_id kosong).
+    """
+    query = db.query(EvaluationPeriod)
+    period = (
+        query.filter(EvaluationPeriod.id == period_id).first()
+        if period_id
+        else get_active_period(db)
+    )
+    if period and period.Is_Snapshot_Locked:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Snapshot evaluasi {period.Triwulan} sudah dikunci ({period.Snapshot_ID}). "
+                "Buka kunci snapshot terlebih dahulu untuk mengubah data."
+            ),
+        )
+    return period
+
+
 # ==============================================================================
 # 1. CORE & HEALTH ENDPOINTS
 # ==============================================================================
@@ -92,7 +127,7 @@ def health_check():
 
 @app.get("/api/settings/rules")
 def get_rule_settings():
-    """Mengembalikan konfigurasi threshold, bobot, dan nama parameter PUVA & OM."""
+    """Mengembalikan konfigurasi threshold, bobot, dan nama parameter PUVA."""
     return {
         "thresholds": THRESHOLDS,
         "weights": WEIGHTS,
@@ -101,20 +136,71 @@ def get_rule_settings():
     }
 
 
-@app.get("/api/period")
-def get_active_period(db: Session = Depends(get_db)):
-    """Mengembalikan periode evaluasi yang aktif saat ini."""
-    period = db.query(EvaluationPeriod).order_by(EvaluationPeriod.id.desc()).first()
-    if not period:
-        raise HTTPException(status_code=404, detail="Periode evaluasi belum diinisialisasi")
+def _period_payload(period: EvaluationPeriod) -> Dict[str, Any]:
+    working_days = json.loads(period.Working_Days_JSON) if period.Working_Days_JSON else []
+    sessions = json.loads(period.MM_OIS_Sessions_JSON) if period.MM_OIS_Sessions_JSON else []
     return {
         "id": period.id,
         "tahun": period.Tahun,
         "triwulan": period.Triwulan,
         "active_threshold_stage": period.Active_Threshold_Stage,
+        "is_active": bool(period.Is_Active),
         "is_snapshot_locked": period.Is_Snapshot_Locked,
         "locked_at": period.Locked_At,
+        "is_sample_data": period.Triwulan == SAMPLE_PERIOD,
+        "working_days_count": len(working_days),
+        "mm_ois_sessions_count": len(sessions),
+        "working_days": working_days,
+        "mm_ois_sessions": sessions,
     }
+
+
+@app.get("/api/period")
+def read_active_period(db: Session = Depends(get_db)):
+    """Mengembalikan periode evaluasi yang aktif saat ini beserta kalender hari kerja & sesi MM OIS."""
+    period = get_active_period(db)
+    if not period:
+        raise HTTPException(status_code=404, detail="Periode evaluasi belum diinisialisasi")
+    return _period_payload(period)
+
+
+@app.get("/api/periods")
+def list_periods(db: Session = Depends(get_db)):
+    """Daftar seluruh periode evaluasi (terbaru lebih dulu)."""
+    active = get_active_period(db)
+    periods = db.query(EvaluationPeriod).order_by(EvaluationPeriod.Triwulan.desc()).all()
+    out = []
+    for p in periods:
+        item = _period_payload(p)
+        item["is_active"] = active is not None and p.id == active.id
+        out.append(item)
+    return out
+
+
+@app.post("/api/periods/{period_id}/activate")
+def activate_period(period_id: int, db: Session = Depends(get_db)):
+    """Jadikan periode ini periode aktif untuk matriks, temuan, snapshot, dan dokumen."""
+    period = db.query(EvaluationPeriod).filter(EvaluationPeriod.id == period_id).first()
+    if not period:
+        raise HTTPException(status_code=404, detail=f"Periode id {period_id} tidak ditemukan.")
+    _set_active_period(db, period)
+    db.commit()
+    return _period_payload(period)
+
+
+def _set_active_period(db: Session, period: EvaluationPeriod) -> None:
+    for p in db.query(EvaluationPeriod).all():
+        p.Is_Active = p.id == period.id
+
+
+def _get_or_create_period(db: Session, tahun: int, triwulan: str) -> EvaluationPeriod:
+    period = db.query(EvaluationPeriod).filter(EvaluationPeriod.Triwulan == triwulan).first()
+    if not period:
+        # Tahap threshold yang berlaku saat ini: EARLY (keputusan DPPK, Nov 2026)
+        period = EvaluationPeriod(Tahun=tahun, Triwulan=triwulan, Active_Threshold_Stage="EARLY", Is_Snapshot_Locked=False)
+        db.add(period)
+        db.flush()
+    return period
 
 
 @app.get("/api/banks")
@@ -126,7 +212,11 @@ def get_all_banks(db: Session = Depends(get_db)):
             "bank_id": b.Bank_ID,
             "masked_alias": b.Masked_Alias,
             "nama_resmi_bank": b.Nama_Resmi_Bank,
+            "nama_singkat": b.Nama_Singkat,
             "kelompok_kbmi": b.Kelompok_KBMI,
+            "sandi_bi": b.Sandi_BI,
+            "kode_bbg": b.Kode_BBG,
+            "no_urut_konfirmasi": b.No_Urut_Konfirmasi,
             "kode_bloomberg": b.Kode_Bloomberg,
             "kode_sppa_antasena": b.Kode_SPPA_Antasena,
         }
@@ -165,6 +255,8 @@ async def upload_and_process_etl(
     - Menghitung 9 Indikator PUVA (B1 - B8) berdasarkan 60 hari kerja.
     - Mengupdate matriks skor dan tiket temuan di database.
     """
+    sample_period = _get_or_create_period(db, 2026, SAMPLE_PERIOD)
+    ensure_period_unlocked(db, sample_period.id)
     resolver = EntityResolver(db)
     dataset_dir = get_dataset_folder()
 
@@ -223,6 +315,7 @@ async def upload_and_process_etl(
     sync_result = evaluate_and_sync_database(
         db=db,
         stage=stage,
+        period_id=sample_period.id,
         raw_metrics=raw_metrics,
         failed_transactions=failed_tx,
         breakdown_stats=breakdown_stats,
@@ -255,6 +348,90 @@ async def upload_and_process_etl(
 # ==============================================================================
 # 3. DYNAMIC THRESHOLD EVALUATION (POST /api/evaluation/recalculate)
 # ==============================================================================
+@app.post("/api/ingest/{source}")
+async def ingest_real_source(
+    source: str,
+    file: Optional[UploadFile] = File(None),
+    db: Session = Depends(get_db),
+):
+    """
+    Ingest data ril per sumber (format file kerja DPPK):
+    - `mm-ois`     -> B8 Partisipasi Matchmaking OIS (sheet Kuotasi export DS Antasena)
+    - `srbi-ratio` -> B6 Rasio Penjualan SRBI Sekunder (rekap sekunder vs win perdana) + kalender hari kerja
+    Bila `file` tidak dikirim, dipakai file dari folder dataset ril lokal (REAL_DATASET_DIR).
+    Periode evaluasi ditentukan dari tanggal di dalam file, lalu dijadikan periode aktif.
+    Hasil memuat cross-check terhadap rekap BI pada file yang sama.
+    """
+    if source not in INGESTERS:
+        raise HTTPException(status_code=404, detail=f"Sumber '{source}' tidak dikenal. Pilihan: {list(INGESTERS)}")
+
+    try:
+        if file and file.filename:
+            file_obj = io.BytesIO(await file.read())
+            file_name = file.filename
+        else:
+            path = find_default_file(source)
+            file_obj = path
+            file_name = os.path.basename(path)
+        result = INGESTERS[source](file_obj, EntityResolver(db))
+        tahun, triwulan = period_from_dates(result["dates"])
+    except IngestError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    period = _get_or_create_period(db, tahun, triwulan)
+    ensure_period_unlocked(db, period.id)
+    if result.get("working_days"):
+        period.Working_Days_JSON = json.dumps(result["working_days"])
+    if result.get("sessions"):
+        period.MM_OIS_Sessions_JSON = json.dumps(result["sessions"])
+    _set_active_period(db, period)
+
+    sync_result = evaluate_and_sync_database(
+        db=db,
+        stage=period.Active_Threshold_Stage or "EARLY",
+        period_id=period.id,
+        raw_metrics=result["raw_metrics"],
+        failed_transactions=result["failed"],
+        breakdown_stats=result["breakdown"],
+    )
+
+    param = result["param"]
+    db.add(AuditTrail(
+        action=f"INGEST_{source.upper().replace('-', '_')}",
+        performed_by="Petugas BI DPPK",
+        details=(
+            f"Ingest {SOURCES[source]['label']} ({param}) periode {triwulan} dari '{file_name}'. "
+            f"Selisih vs rekap BI: {len(result['crosscheck'])}. Bank tak dikenal: {len(result['unknown_banks'])}."
+        ),
+    ))
+    db.commit()
+
+    per_bank = []
+    for b in db.query(MasterBank).order_by(MasterBank.Bank_ID).all():
+        per_bank.append({
+            "bank_id": b.Bank_ID,
+            "nama_singkat": b.Nama_Singkat,
+            "masked_alias": b.Masked_Alias,
+            "rate": result["raw_metrics"].get(b.Bank_ID, {}).get(param),
+            "detail": result["breakdown"].get(b.Bank_ID, {}).get(param),
+        })
+
+    return {
+        "status": "success",
+        "source": source,
+        "parameter": param,
+        "file_name": file_name,
+        "period": _period_payload(period),
+        "per_bank": per_bank,
+        "crosscheck": {
+            "available": result["crosscheck_available"],
+            "differences": result["crosscheck"],
+        },
+        "unknown_banks": result["unknown_banks"],
+        "evaluation_summary": sync_result,
+    }
+
+
 @app.post("/api/evaluation/recalculate")
 def recalculate_evaluation(
     stage: str = Query("EARLY", description="Tahap threshold: EARLY, INTERMEDIATE, END_STATE"),
@@ -265,7 +442,7 @@ def recalculate_evaluation(
     Evaluasi Threshold Dinamis PADG No. 23/2024:
     - Membandingkan nilai realisasi mentah dengan ambang batas (EARLY / INTERMEDIATE / END_STATE).
     - Menghitung skor bobot penuh jika lolos atau 0 jika gagal.
-    - Menghitung skor komposit (PUVA maks 60% + OM maks 40%) dan status rekomendasi akhir.
+    - Menghitung total skor PUVA (maks 60%) dan status akhir bank.
     - Otomatis membuat atau memperbarui tiket temuan di FindingTicket untuk transaksi yang melanggar batas aturan.
     """
     stage_upper = stage.upper()
@@ -275,6 +452,7 @@ def recalculate_evaluation(
             detail=f"Tahap threshold tidak valid. Pilihan yang tersedia: {list(THRESHOLDS.keys())}"
         )
 
+    ensure_period_unlocked(db, period_id)
     sync_result = evaluate_and_sync_database(
         db=db,
         stage=stage_upper,
@@ -293,14 +471,21 @@ def recalculate_evaluation(
 # ==============================================================================
 @app.get("/api/matrix")
 def get_score_matrix(
-    stage: str = Query("EARLY", description="Stage threshold: EARLY, INTERMEDIATE, END_STATE"),
+    stage: str = Query("EARLY", description="(Diabaikan) tahap mengikuti periode aktif"),
     db: Session = Depends(get_db)
 ):
     """
-    Mengembalikan seluruh matriks skor 21 Bank DU (PUVA + OM) lengkap dengan
-    nilai mentah sebelum threshold, status lolos/gagal, skor berbobot, dan status kepatuhan.
+    Matriks skor 21 Bank DU pada periode aktif: nilai realisasi sebelum threshold
+    (null = sumber data belum diunggah), status lolos/gagal, skor berbobot, total PUVA (maks 60%).
     """
-    records = db.query(BankScoreMatrix).join(MasterBank).order_by(MasterBank.Bank_ID).all()
+    period = get_active_period(db)
+    if not period:
+        return []
+    records = (
+        db.query(BankScoreMatrix).join(MasterBank)
+        .filter(BankScoreMatrix.period_id == period.id)
+        .order_by(MasterBank.Bank_ID).all()
+    )
     results = []
     for r in records:
         b = r.bank
@@ -309,28 +494,14 @@ def get_score_matrix(
             "bank_id": r.Bank_ID,
             "masked_alias": b.Masked_Alias,
             "nama_resmi_bank": b.Nama_Resmi_Bank,
+            "nama_singkat": b.Nama_Singkat,
             "kelompok_kbmi": b.Kelompok_KBMI,
-            "raw_metrics": {
-                "B1": r.b1_raw, "B2": r.b2_raw, "B3": r.b3_raw,
-                "B4": r.b4_raw, "B5": r.b5_raw,
-                "B6": r.b6_raw, "B7a": r.b7a_raw, "B7b": r.b7b_raw, "B8": r.b8_raw,
-                "OM1": r.om1_raw, "OM2": r.om2_raw, "OM3": r.om3_raw,
-            },
-            "passed_flags": {
-                "B1": r.b1_passed, "B2": r.b2_passed, "B3": r.b3_passed,
-                "B4": r.b4_passed, "B5": r.b5_passed,
-                "B6": r.b6_passed, "B7a": r.b7a_passed, "B7b": r.b7b_passed, "B8": r.b8_passed,
-                "OM1": r.om1_passed, "OM2": r.om2_passed, "OM3": r.om3_passed,
-            },
-            "weighted_scores": {
-                "B1": r.b1_score, "B2": r.b2_score, "B3": r.b3_score,
-                "B4": r.b4_score, "B5": r.b5_score,
-                "B6": r.b6_score, "B7a": r.b7a_score, "B7b": r.b7b_score, "B8": r.b8_score,
-                "OM1": r.om1_score, "OM2": r.om2_score, "OM3": r.om3_score,
-            },
+            "period": period.Triwulan,
+            "raw_metrics": {c: getattr(r, f"{c.lower()}_raw") for c in PUVA_CODES},
+            "passed_flags": {c: getattr(r, f"{c.lower()}_passed") for c in PUVA_CODES},
+            "weighted_scores": {c: getattr(r, f"{c.lower()}_score") for c in PUVA_CODES},
             "total_puva_score": r.total_puva_score,
-            "total_om_score": r.total_om_score,
-            "composite_score": r.composite_score,
+            "max_puva_score": MAX_PUVA_SCORE,
             "compliance_status": r.compliance_status,
             "detail_metrics": detail_metrics,
         })
@@ -342,8 +513,11 @@ def get_finding_tickets(
     bank_id: Optional[str] = Query(None, description="Filter berdasarkan Bank_ID spesifik"),
     db: Session = Depends(get_db)
 ):
-    """Mengembalikan daftar tiket temuan dan sanggahan bank DU."""
+    """Mengembalikan daftar tiket temuan dan sanggahan bank DU pada periode aktif."""
     query = db.query(FindingTicket).join(MasterBank)
+    period = get_active_period(db)
+    if period:
+        query = query.filter(FindingTicket.period_id == period.id)
     if bank_id:
         query = query.filter(FindingTicket.Bank_ID == bank_id)
     tickets = query.order_by(FindingTicket.Finding_ID).all()
@@ -390,6 +564,7 @@ async def submit_bank_dispute(
     ticket = db.query(FindingTicket).filter(FindingTicket.Finding_ID == finding_id).first()
     if not ticket:
         raise HTTPException(status_code=404, detail=f"Tiket Temuan '{finding_id}' tidak ditemukan.")
+    ensure_period_unlocked(db, ticket.period_id)
 
     # Simpan berkas bukti jika ada
     saved_filename = ticket.File_Bukti_Name
@@ -437,7 +612,7 @@ def analyze_finding_with_ai(finding_id: str, db: Session = Depends(get_db)):
     """
     AI Evidence Checker:
     Memeriksa klaim bank dan bukti dokumen terhadap aturan mutlak PADG No. 23/2024.
-    Menggunakan google-genai (Gemini 2.5 Flash) jika GEMINI_API_KEY tersedia,
+    Menggunakan Gemini API jika GEMINI_API_KEY tersedia,
     atau Fallback Deterministic Rule Analyzer.
     Nama bank di-masking ke alias demi kerahasiaan perbankan.
     """
@@ -445,7 +620,7 @@ def analyze_finding_with_ai(finding_id: str, db: Session = Depends(get_db)):
     if not ticket:
         raise HTTPException(status_code=404, detail=f"Tiket Temuan '{finding_id}' tidak ditemukan.")
 
-    period = db.query(EvaluationPeriod).order_by(EvaluationPeriod.id.desc()).first()
+    period = ensure_period_unlocked(db, ticket.period_id)
     stage = period.Active_Threshold_Stage if period else "EARLY"
 
     failed_details = json.loads(ticket.Detail_Transaksi_Gugur) if ticket.Detail_Transaksi_Gugur else []
@@ -492,13 +667,15 @@ def decide_finding_dispute(
     decision: str = Form(..., description="'APPROVED' atau 'REJECTED'"),
     verified_by: Optional[str] = Form("Petugas BI DPPK"),
     notes: Optional[str] = Form(None),
+    approved_value: Optional[float] = Form(None, description="Nilai realisasi (%) yang ditetapkan petugas. Default: angka klaim bank."),
     db: Session = Depends(get_db),
 ):
     """
     Kontrol Human-in-the-Loop Petugas BI:
     Mengeksekusi keputusan final ('APPROVED' atau 'REJECTED'):
-    - Jika APPROVED: Otomatis memperbarui nilai pemenuhan bank menjadi lolos threshold,
-      menghitung ulang skor subtotal PUVA & komposit, serta mencatat di Audit Trail.
+    - Jika APPROVED: nilai realisasi parameter diganti dengan nilai yang disetujui
+      (approved_value, atau angka klaim bank), lalu skor dihitung ulang terhadap threshold
+      aktif. Parameter hanya menjadi lolos bila nilai tersebut memang memenuhi threshold.
     - Jika REJECTED: Mempertahankan temuan dan mencatat penolakan di Audit Trail.
     """
     dec_upper = decision.upper().strip()
@@ -509,72 +686,63 @@ def decide_finding_dispute(
     if not ticket:
         raise HTTPException(status_code=404, detail=f"Tiket Temuan '{finding_id}' tidak ditemukan.")
 
-    period = db.query(EvaluationPeriod).order_by(EvaluationPeriod.id.desc()).first()
-    stage = period.Active_Threshold_Stage if period else "EARLY"
+    period = ensure_period_unlocked(db, ticket.period_id)
+    if not period:
+        raise HTTPException(status_code=404, detail="Periode evaluasi belum diinisialisasi.")
+    stage = period.Active_Threshold_Stage or "EARLY"
 
-    ticket.BI_Decision_Status = dec_upper
-    ticket.Verified_By = verified_by or "Petugas BI DPPK"
-    ticket.Updated_At = datetime.utcnow()
-
-    # Ambil matriks skor bank yang bersangkutan
+    # Matriks skor bank pada periode yang sama dengan tiket
     matrix_entry = db.query(BankScoreMatrix).filter(
-        BankScoreMatrix.Bank_ID == ticket.Bank_ID
-    ).order_by(BankScoreMatrix.id.desc()).first()
+        BankScoreMatrix.Bank_ID == ticket.Bank_ID,
+        BankScoreMatrix.period_id == period.id,
+    ).first()
+    if not matrix_entry:
+        raise HTTPException(status_code=404, detail=f"Matriks skor {ticket.Bank_ID} untuk periode {period.Triwulan} tidak ditemukan.")
 
-    param_code = ticket.Parameter_Code.strip().upper()
-    param_key = param_code.lower()
+    param_code = canonical_code(ticket.Parameter_Code)
+    threshold_val = THRESHOLDS.get(stage, THRESHOLDS["EARLY"]).get(param_code, 80.0)
+    officer = verified_by or "Petugas BI DPPK"
 
     if dec_upper == "APPROVED":
-        # 1. Ekstrak nilai angka klaim jika ada (misal '85.00%' -> 85.0)
-        claimed_val = None
-        if ticket.Nilai_Klaim_Bank:
-            match = re.search(r"(\d+(?:\.\d+)?)", ticket.Nilai_Klaim_Bank)
-            if match:
-                claimed_val = float(match.group(1))
+        # 1. Tentukan nilai yang disetujui: input petugas > angka klaim bank
+        final_val = approved_value
+        if final_val is None:
+            final_val = parse_claim_percent(ticket.Nilai_Klaim_Bank)
+        if final_val is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Klaim bank tidak memuat angka persentase. Isi 'approved_value' (nilai realisasi yang disetujui) untuk menyetujui sanggahan.",
+            )
+        if not 0.0 <= final_val <= 100.0:
+            raise HTTPException(status_code=400, detail="Nilai yang disetujui harus berada di rentang 0 - 100%.")
 
-        # Jika tidak ditemukan angka klaim, set nilai di atas ambang batas stage aktif
-        threshold_val = THRESHOLDS.get(stage, THRESHOLDS["EARLY"]).get(param_code, 80.0)
-        final_val = claimed_val if claimed_val and claimed_val >= threshold_val else (threshold_val + 2.0)
-
-        # 2. Update kolom di BankScoreMatrix
-        if hasattr(matrix_entry, f"{param_key}_raw"):
-            setattr(matrix_entry, f"{param_key}_raw", final_val)
-        if hasattr(matrix_entry, f"{param_key}_passed"):
-            setattr(matrix_entry, f"{param_key}_passed", True)
-        if hasattr(matrix_entry, f"{param_key}_score"):
-            setattr(matrix_entry, f"{param_key}_score", WEIGHTS.get(param_code, 0.0))
-
-        # 3. Hitung ulang total PUVA, OM, dan komposit
-        puva_codes = ["B1", "B2", "B3", "B4", "B5", "B6", "B7a", "B7b", "B8"]
-        new_puva = 0.0
-        for code in puva_codes:
-            ck = code.lower()
-            new_puva += getattr(matrix_entry, f"{ck}_score", 0.0)
-
-        om_total = getattr(matrix_entry, "total_om_score", 40.0) or 40.0
-        composite = round(new_puva + om_total, 2)
-
-        if composite >= 100.0:
-            compliance = "MEMENUHI"
-        elif composite >= 90.0:
-            compliance = "PEMBINAAN_DSMM"
-        else:
-            compliance = "SANKSI_TEGURAN"
-
-        matrix_entry.total_puva_score = round(new_puva, 2)
-        matrix_entry.composite_score = composite
-        matrix_entry.compliance_status = compliance
+        # 2. Terapkan nilai lalu hitung ulang seluruh skor dengan Rule Engine
+        raw = matrix_to_raw(matrix_entry)
+        raw[param_code] = max(raw.get(param_code, 0.0), final_val)
+        scores = compute_matrix_scores(raw, stage=stage)
+        for k, v in scores.items():
+            if hasattr(matrix_entry, k):
+                setattr(matrix_entry, k, v)
         matrix_entry.updated_at = datetime.utcnow()
 
+        ticket.Approved_Value = final_val
+        now_passed = scores.get(f"{param_code.lower()}_passed", False)
         audit_detail = (
-            f"Petugas {ticket.Verified_By} MENYETUJUI sanggahan {ticket.Finding_ID} ({ticket.bank.Masked_Alias}). "
-            f"Parameter {param_code} disesuaikan menjadi {final_val}%. Skor PUVA baru: {matrix_entry.total_puva_score}% (Status: {compliance})."
+            f"Petugas {officer} MENYETUJUI sanggahan {ticket.Finding_ID} ({ticket.bank.Masked_Alias}). "
+            f"Parameter {param_code} disesuaikan menjadi {raw[param_code]:.2f}% "
+            f"({'LOLOS' if now_passed else 'tetap DI BAWAH'} threshold {stage} {threshold_val:.1f}%). "
+            f"Skor PUVA baru: {matrix_entry.total_puva_score}% (Status: {matrix_entry.compliance_status})."
         )
     else:
+        ticket.Approved_Value = None
         audit_detail = (
-            f"Petugas {ticket.Verified_By} MENOLAK sanggahan {ticket.Finding_ID} ({ticket.bank.Masked_Alias}). "
-            f"Status temuan dipertahankan. Catatan: '{notes or 'Tidak memenuhi ketentuan PADG No. 23/2024'}."
+            f"Petugas {officer} MENOLAK sanggahan {ticket.Finding_ID} ({ticket.bank.Masked_Alias}). "
+            f"Status temuan dipertahankan. Catatan: '{notes or 'Tidak memenuhi ketentuan PADG No. 23/2024'}'."
         )
+
+    ticket.BI_Decision_Status = dec_upper
+    ticket.Verified_By = officer
+    ticket.Updated_At = datetime.utcnow()
 
     # Catat di Audit Trail
     audit = AuditTrail(
@@ -596,7 +764,6 @@ def decide_finding_dispute(
                 "bank_id": matrix_entry.Bank_ID,
                 "alias": ticket.bank.Masked_Alias,
                 "total_puva_score": matrix_entry.total_puva_score,
-                "composite_score": matrix_entry.composite_score,
                 "compliance_status": matrix_entry.compliance_status,
             },
         },
@@ -617,13 +784,17 @@ def send_ews_reminder(bank_id: str = Form(...), db: Session = Depends(get_db)):
     if not bank:
         raise HTTPException(status_code=404, detail=f"Bank '{bank_id}' tidak ditemukan.")
 
-    matrix_entry = db.query(BankScoreMatrix).filter(BankScoreMatrix.Bank_ID == bank.Bank_ID).first()
+    period = get_active_period(db)
+    matrix_entry = db.query(BankScoreMatrix).filter(
+        BankScoreMatrix.Bank_ID == bank.Bank_ID,
+        BankScoreMatrix.period_id == (period.id if period else None),
+    ).first()
 
-    # Kumpulkan parameter yang gugur
+    # Kumpulkan parameter yang gugur (None = data belum ada, bukan gugur)
     failed_params = []
     if matrix_entry:
-        for p in ["B1", "B2", "B3", "B4", "B5", "B6", "B7a", "B7b", "B8"]:
-            if not getattr(matrix_entry, f"{p.lower()}_passed", True):
+        for p in PUVA_CODES:
+            if getattr(matrix_entry, f"{p.lower()}_passed", None) is False:
                 failed_params.append(p)
 
     recipient = f"compliance.puva@{bank.Kode_SPPA_Antasena.lower()}.co.id"
@@ -688,7 +859,7 @@ def export_single_bank_worksheet(bank_id: str, db: Session = Depends(get_db)):
             detail=f"Bank Dealer Utama dengan ID atau Alias '{bank_id}' tidak ditemukan."
         )
 
-    period = db.query(EvaluationPeriod).order_by(EvaluationPeriod.id.desc()).first()
+    period = get_active_period(db)
     triwulan_str = period.Triwulan if period else "2026-Q2"
 
     try:
@@ -727,14 +898,14 @@ def get_snapshot_status(db: Session = Depends(get_db)):
     """
     Mengembalikan status penguncian snapshot evaluasi saat ini.
     """
-    period = db.query(EvaluationPeriod).order_by(EvaluationPeriod.id.desc()).first()
+    period = get_active_period(db)
     if not period:
         raise HTTPException(status_code=404, detail="Periode evaluasi belum diinisialisasi.")
 
     matrices = db.query(BankScoreMatrix).filter(BankScoreMatrix.period_id == period.id).all()
-    full_pass = sum(1 for m in matrices if m.compliance_status == "MEMENUHI")
-    pembinaan = sum(1 for m in matrices if m.compliance_status == "PEMBINAAN_DSMM")
-    sanksi = sum(1 for m in matrices if m.compliance_status == "SANKSI_TEGURAN")
+    full_pass = sum(1 for m in matrices if m.compliance_status == STATUS_MEMENUHI)
+    tidak_memenuhi = sum(1 for m in matrices if m.compliance_status == STATUS_TIDAK_MEMENUHI)
+    belum_lengkap = sum(1 for m in matrices if m.compliance_status == STATUS_DATA_BELUM_LENGKAP)
 
     return {
         "period": period.Triwulan,
@@ -746,8 +917,8 @@ def get_snapshot_status(db: Session = Depends(get_db)):
         "summary": {
             "total_banks": len(matrices),
             "full_pass": full_pass,
-            "pembinaan": pembinaan,
-            "sanksi": sanksi,
+            "tidak_memenuhi": tidak_memenuhi,
+            "data_belum_lengkap": belum_lengkap,
         },
     }
 
@@ -763,7 +934,7 @@ def lock_evaluation_snapshot(
     - Menghasilkan Snapshot ID (e.g. SNP-2026Q2-FINAL).
     - Mencatat di Audit Trail.
     """
-    period = db.query(EvaluationPeriod).order_by(EvaluationPeriod.id.desc()).first()
+    period = get_active_period(db)
     if not period:
         raise HTTPException(status_code=404, detail="Periode evaluasi belum diinisialisasi.")
 
@@ -780,7 +951,6 @@ def lock_evaluation_snapshot(
         "matrices": [
             {
                 "bank_id": m.Bank_ID,
-                "composite_score": m.composite_score,
                 "compliance_status": m.compliance_status,
                 "total_puva": m.total_puva_score,
             }
@@ -824,7 +994,7 @@ def unlock_evaluation_snapshot(db: Session = Depends(get_db)):
     """
     Membuka kembali kunci snapshot evaluasi untuk keperluan simulasi ulang / koreksi lanjutan.
     """
-    period = db.query(EvaluationPeriod).order_by(EvaluationPeriod.id.desc()).first()
+    period = get_active_period(db)
     if not period:
         raise HTTPException(status_code=404, detail="Periode evaluasi belum diinisialisasi.")
 
@@ -887,7 +1057,7 @@ def export_memo_word_get(
     if memo_type_clean not in ["m02", "m01"]:
         raise HTTPException(status_code=400, detail="memo_type harus berupa 'm02' atau 'm01'.")
 
-    period = db.query(EvaluationPeriod).order_by(EvaluationPeriod.id.desc()).first()
+    period = get_active_period(db)
     triwulan_str = period.Triwulan if period else "2026-Q2"
 
     try:
@@ -946,7 +1116,7 @@ def export_official_attachments(
     - Sheet 2: Lampiran 2 - Setelah Threshold (Skor Terbobot & Komposit)
     - Sheet 3: Lampiran 3 - Tindak Lanjut (Status Kepatuhan & Rekomendasi Sanksi/Pembinaan)
     """
-    period = db.query(EvaluationPeriod).order_by(EvaluationPeriod.id.desc()).first()
+    period = get_active_period(db)
     triwulan_str = period.Triwulan if period else "2026-Q2"
 
     try:

@@ -2,6 +2,7 @@
 
 import React, { useState } from "react"
 import { useApp } from "@/context/AppContext"
+import { RealDataIngestPanel } from "@/components/RealDataIngestPanel"
 import {
   Database,
   UploadCloud,
@@ -101,6 +102,18 @@ export const SmartEtlView: React.FC = () => {
           </h2>
         </div>
 
+      </div>
+
+      <RealDataIngestPanel />
+
+      {/* Dataset sample sintetis: sementara untuk parameter yang parser data rilnya belum selesai */}
+      <div className="flex flex-wrap items-center justify-between gap-4 pt-2">
+        <div>
+          <h3 className="font-bold text-sm text-slate-900">Dataset Sample Sintetis (Triwulan II - 2026)</h3>
+          <p className="text-xs text-slate-500 mt-0.5">
+            Sementara untuk B1–B5 dan B7 sampai parser data rilnya selesai. Hasilnya masuk ke periode sample, bukan periode data ril.
+          </p>
+        </div>
         <button
           onClick={handleRunSampleEtl}
           disabled={isProcessing}
@@ -114,7 +127,7 @@ export const SmartEtlView: React.FC = () => {
           ) : (
             <>
               <Database className="w-4 h-4" />
-              <span>Jalankan Pipeline ETL</span>
+              <span>Jalankan ETL Sample</span>
             </>
           )}
         </button>
@@ -137,8 +150,8 @@ export const SmartEtlView: React.FC = () => {
               <strong>{etlResult.processed_rows?.hartis_secondary} deal</strong>
             </div>
             <div>
-              <span className="text-slate-500 block">Bank Lolos Penuh:</span>
-              <strong className="text-emerald-700">{etlResult.evaluation_summary?.full_compliance_count} Bank</strong>
+              <span className="text-slate-500 block">Bank Memenuhi:</span>
+              <strong className="text-emerald-700">{etlResult.evaluation_summary?.memenuhi_count} Bank</strong>
             </div>
             <div>
               <span className="text-slate-500 block">Temuan Terdeteksi:</span>
@@ -200,8 +213,9 @@ export const SmartEtlView: React.FC = () => {
                 <th className="p-2.5 w-28">Masked Alias</th>
                 <th className="p-2.5">Nama Resmi Bank (PT Bank ...)</th>
                 <th className="p-2.5 w-24">Kelompok</th>
-                <th className="p-2.5 w-32 font-mono">Ticker Bloomberg</th>
-                <th className="p-2.5 w-32 font-mono">Sandi SPPA/Antasena</th>
+                <th className="p-2.5 w-24 font-mono">Sandi BI</th>
+                <th className="p-2.5 w-28 font-mono">Kode BBG</th>
+                <th className="p-2.5 w-24 font-mono">No. Konfirmasi</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 font-medium">
@@ -211,8 +225,9 @@ export const SmartEtlView: React.FC = () => {
                   <td className="p-2.5 font-semibold text-slate-800">{b.masked_alias}</td>
                   <td className="p-2.5 text-slate-700">{b.nama_resmi_bank}</td>
                   <td className="p-2.5 text-slate-500">{b.kelompok_kbmi}</td>
-                  <td className="p-2.5 font-mono text-[11px] text-blue-600 bg-blue-50/40">{b.kode_bloomberg}</td>
-                  <td className="p-2.5 font-mono text-[11px] text-amber-700 bg-amber-50/40">{b.kode_sppa_antasena}</td>
+                  <td className="p-2.5 font-mono text-[11px] text-amber-700 bg-amber-50/40">{b.sandi_bi}</td>
+                  <td className="p-2.5 font-mono text-[11px] text-blue-600 bg-blue-50/40">{b.kode_bbg}</td>
+                  <td className="p-2.5 font-mono text-[11px] text-slate-600">{b.no_urut_konfirmasi}</td>
                 </tr>
               ))}
             </tbody>

@@ -1,0 +1,33 @@
+FINAL PROJECT REQUIREMENT
+
+Evaluasi DU dilakukan triwulanan, perhatikan jg threshold bobot dll, baca padgi ttg DU PUVA
+proses:
+periode evaluasi dimulai
+||
+ambil data kewajiban DU melalui platform
+- data kuotasi Repo, SRBI, dan OIS via bloomberg & SPPA
+- data trsk sekunder Repo, SRBI via hartis
+- data matchmaking OIS via ds antasena
+||
+rekap data kewajiban ALL dalam worksheet BI, satu kewajiban satu worksheet
+||
+pisahkan data ALL ke worksheet PER BANK, isinya semua hasil rekap kewajiban oleh BI per banknya
+||
+konfirmasi rekap worksheet PER BANK utk semua DU (kirim via email ke PIC masing" bank), sekalian nanya counterparty line lewat worksheet yang sama (ada sheet khusus counterparty line yg bisa diisi mandiri oleh bank)
+||
+sesuaikan data rekap worksheet sesuai reply konfirmasi (bisa jadi ada bank yg menyanggah, upload bukti, dll di step ini. semua bukti ditaruh di worksheet yg sama yg telah diupdate bank)
+||
+Looping step 5 dan 6 sampai dispute selesai
+||
+buat M02 evaluasi triwulanan DU 
+||
+kirim M02 ke Pimpinan
+||
+kirim M01 ke DSMM
+||
+selesai
+
+pain points 
+- banyak proses yang manual, 
+- proses konfirmasi rekap BI vs rekap Bank butuh waktu lama, 
+- butuh verifikasi manual utk bukti yg dikirim oleh bank, dan kalo sama sama ngeyel ga kelar"
