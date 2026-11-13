@@ -92,6 +92,15 @@ export interface FailedTransactionItem {
   persentase_terhadap_win?: string
   kekurangan_volume?: number
   rasio_pemenuhan?: string
+  // Format data ril (Sprint 2)
+  rincian?: Array<{ tenor: string; spread_bps: number | null; batas_bps?: number; masalah: string }>
+  hari_bertransaksi?: number
+  target_hari?: number
+  total_hari_kerja?: number
+  tanggal_tanpa_transaksi?: string[]
+  volume_win_perdana_miliar?: number
+  target_kewajiban_30pct_miliar?: number
+  realisasi_penjualan_sekunder_miliar?: number
   alasan?: string
   parameter?: string
   peran?: string

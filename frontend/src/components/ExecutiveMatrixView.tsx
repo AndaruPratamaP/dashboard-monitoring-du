@@ -23,14 +23,14 @@ import {
 // Definisi Parameter PUVA
 const PUVA_PARAMS = [
   { code: "B1", name: "Repo Quotes", full: "Kuotasi Harga Repo", weight: 2.5, detail: "Setiap hari kerja; spread maks. 5 bps (O/N) & 20 bps (1W, 1M)" },
-  { code: "B2", name: "SRBI Quotes", full: "Kuotasi Harga SRBI", weight: 2.5, detail: "Setiap hari kerja; seri SRBI tradable; spread maks. 20 bps" },
-  { code: "B3", name: "OIS Quotes", full: "Kuotasi Harga OIS", weight: 2.5, detail: "Setiap hari kerja; tenor 1M & 3M; spread maks. 20 bps" },
+  { code: "B2", name: "SRBI Quotes", full: "Kuotasi Harga SRBI", weight: 2.5, detail: "Setiap hari kerja; spread maks. 20 bps untuk seluruh seri yang dikuotasi" },
+  { code: "B3", name: "OIS Quotes", full: "Kuotasi Harga OIS", weight: 2.5, detail: "Setiap hari kerja; tenor 3 bulan & 12 bulan; spread maks. 20 bps" },
   { code: "B4", name: "Repo Line", full: "Counterparty Line Repo", weight: 7.5, detail: "Minimal 10 bank DU dan 10 bank non-DU pada akhir periode" },
   { code: "B5", name: "OIS Line", full: "Counterparty Line OIS", weight: 2.5, detail: "Minimal 10 bank DU pada akhir periode" },
-  { code: "B6", name: "SRBI Sekunder", full: "Penjualan SRBI Pasar Sekunder", weight: 7.5, detail: "Minimal 30% dari volume win pada lelang pasar perdana (status SETTLED)" },
-  { code: "B7a", name: "Repo Sekunder", full: "Transaksi Repo Pasar Sekunder", weight: 20.0, detail: "Tenor minimal 2 minggu (>=14 hari), minimal 60% hari kerja (36 hari)" },
-  { code: "B7b", name: "SRBI Tenor 3B", full: "Transaksi SRBI Pasar Sekunder", weight: 5.0, detail: "Sisa jangka waktu minimal 3 bulan, minimal 60% hari kerja (36 hari)" },
-  { code: "B8", name: "OIS Match", full: "Matchmaking OIS", weight: 10.0, detail: "Tenor 1M dan 3M pada setiap sesi matchmaking OIS (6 periode)" },
+  { code: "B6", name: "SRBI Sekunder", full: "Penjualan SRBI Pasar Sekunder", weight: 7.5, detail: "Penjualan sekunder minimal 30% dari volume win lelang perdana (kumulatif triwulan)" },
+  { code: "B7a", name: "Repo Sekunder", full: "Transaksi Repo Pasar Sekunder", weight: 20.0, detail: "Tenor minimal 2 minggu (>=14 hari), minimal 60% hari kerja" },
+  { code: "B7b", name: "SRBI Tenor 3B", full: "Transaksi SRBI Pasar Sekunder", weight: 5.0, detail: "Sisa jangka waktu minimal 3 bulan, minimal 60% hari kerja" },
+  { code: "B8", name: "OIS Match", full: "Matchmaking OIS", weight: 10.0, detail: "Kuotasi tenor 1 bulan & 3 bulan pada setiap sesi matchmaking OIS" },
 ]
 
 const THRESHOLD_VALS: Record<ThresholdStage, Record<string, number>> = {

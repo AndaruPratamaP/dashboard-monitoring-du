@@ -63,14 +63,14 @@ PARAMETER_NAMES = {
 
 PARAMETER_DETAILS = {
     "B1": "Setiap hari kerja; spread maks. 5 bps (O/N) & maks. 20 bps (1W, 1M)",
-    "B2": "Setiap hari kerja; seri SRBI tradable; spread maks. 20 bps",
-    "B3": "Setiap hari kerja; tenor 1M & 3M; spread maks. 20 bps",
+    "B2": "Setiap hari kerja; kuotasi dua sisi; spread maks. 20 bps untuk seluruh seri yang dikuotasi",
+    "B3": "Setiap hari kerja; tenor 3 bulan & 12 bulan; spread maks. 20 bps",
     "B4": "Minimal 10 bank DU dan 10 bank non-DU pada akhir periode",
     "B5": "Minimal 10 bank DU pada akhir periode",
     "B6": "Minimal 30% dari volume win pada lelang pasar perdana (status SETTLED)",
-    "B7a": "Tenor minimal 2 minggu (>=14 hari), minimal 60% hari kerja (36 hari)",
-    "B7b": "Sisa jangka waktu minimal 3 bulan, minimal 60% hari kerja (36 hari)",
-    "B8": "Tenor 1M dan 3M pada setiap sesi matchmaking OIS (6 periode)",
+    "B7a": "Tenor minimal 2 minggu (>=14 hari), minimal 60% hari kerja",
+    "B7b": "Sisa jangka waktu minimal 3 bulan, minimal 60% hari kerja",
+    "B8": "Kuotasi tenor 1 bulan & 3 bulan pada setiap sesi matchmaking OIS",
 }
 
 

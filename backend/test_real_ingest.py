@@ -53,4 +53,53 @@ with TestClient(app) as client:
     assert client.get("/api/findings").json() == []
     print("Matriks OK: B6+B8 terisi, parameter lain 'belum ada data', tanpa temuan palsu")
 
+    def ingest(source):
+        r = client.post(f"/api/ingest/{source}")
+        assert r.status_code == 200, r.text
+        j = r.json()
+        assert j["period"]["triwulan"] == "2026-Q3" and j["unknown_banks"] == [], (source, j["unknown_banks"])
+        below = {x["bank_id"]: x["rate"] for x in j["per_bank"] if x["rate"] is not None and x["rate"] < 100}
+        diffs = {(d["bank_id"], d.get("tanggal")) for d in j["crosscheck"]["differences"]}
+        return j, below, diffs
+
+    # --- B7a / B7b: rekap transaksi harian, 60% dari 64 hari kerja = 38 hari
+    for src in ("repo-2m", "srbi-3b"):
+        j, below, diffs = ingest(src)
+        assert below == {} and diffs == set(), (src, below, diffs)
+        assert all(x["detail"]["target_days"] == 38 for x in j["per_bank"]), src
+    print("B7a/B7b OK: 21 bank >= 60% hari kerja, frekuensi sama dengan rekap BI")
+
+    # --- B1 Repo: cocok penuh dengan rekap BI; temuan M.01 (Deutsche 21 Jul 210 bps, HSBC 1 bulan 8 Jul & 27 Agu)
+    j, below, diffs = ingest("bbg-repo")
+    assert below == {"DU-01": 96.88, "DU-14": 98.44, "DU-16": 96.88}, below
+    assert diffs == set(), diffs
+    dbank = next(x for x in j["per_bank"] if x["bank_id"] == "DU-12")
+    assert dbank["detail"]["sumber"].startswith("sheet manual"), dbank  # DBS: sheet DBSI_ref
+    print("B1 OK: Repo cocok 100% dengan rekap BI")
+
+    # --- B2 SRBI: spread maksimum antar seri (BTN 13 Jul 85 bps); HSBC 16 hari tanpa kuotasi (75%)
+    j, below, diffs = ingest("bbg-srbi")
+    assert below["DU-16"] == 75.0 and below["DU-19"] == 98.44 and below["DU-01"] == 96.88, below
+    assert ("DU-19", "2026-07-13") not in diffs  # BTN 85 bps sama dengan rekap BI
+    assert {b for b, _ in diffs} == {"DU-01", "DU-14"}, diffs  # BRI 8 Jul & Deutsche: dikoreksi BI pasca-konfirmasi
+    print(f"B2 OK: HSBC 75%, BTN 13 Jul 85 bps; {len(diffs)} selisih pasca-konfirmasi (BRI, Deutsche)")
+
+    # --- B3 OIS: BCA kosong 16 Jul & 6 Agu; Deutsche dinilai dari rekap BI (ticker Bloomberg invalid)
+    j, below, diffs = ingest("bbg-ois")
+    assert below == {"DU-06": 96.88, "DU-14": 15.62, "DU-21": 98.44}, below
+    assert diffs == {("DU-21", "2026-07-14")}, diffs  # Mega 14 Jul dikoreksi BI
+    assert {n["bank_id"] for n in j["source_notes"]} == {"DU-12", "DU-14"}, j["source_notes"]
+    print("B3 OK: BCA 2 hari, Deutsche 15,62%, 1 selisih (Mega 14 Jul)")
+
+    # --- Matriks akhir: hanya B4/B5 (counterparty line) yang belum ada data.
+    # Temuan = Deutsche OIS dan HSBC SRBI, sama dengan lampiran M.01 BI.
+    m = {row["bank_id"]: row for row in client.get("/api/matrix").json()}
+    assert all(row["raw_metrics"]["B4"] is None and row["raw_metrics"]["B1"] is not None for row in m.values())
+    assert m["DU-14"]["compliance_status"] == "TIDAK_MEMENUHI" and m["DU-14"]["total_puva_score"] == 47.5
+    assert m["DU-16"]["compliance_status"] == "TIDAK_MEMENUHI"
+    assert m["DU-01"]["compliance_status"] == "DATA_BELUM_LENGKAP" and m["DU-01"]["total_puva_score"] == 50.0
+    findings = sorted(f["finding_id"] for f in client.get("/api/findings").json())
+    assert len(findings) == 2 and findings[0].endswith("DU14-B3") and findings[1].endswith("DU16-B2"), findings
+    print("Matriks akhir OK: temuan = Deutsche B3 & HSBC B2 (sesuai M.01); B4/B5 menunggu data")
+
 print("\nALL REAL-DATA INGEST TESTS PASSED")

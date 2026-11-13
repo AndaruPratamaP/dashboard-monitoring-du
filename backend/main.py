@@ -356,8 +356,10 @@ async def ingest_real_source(
 ):
     """
     Ingest data ril per sumber (format file kerja DPPK):
+    - `bbg-repo` / `bbg-srbi` / `bbg-ois` -> B1 / B2 / B3 Kuotasi Bloomberg (worksheet Price Quotation Gen 2)
+    - `srbi-ratio` -> B6 Rasio Penjualan SRBI Sekunder (rekap sekunder vs win perdana)
+    - `repo-2m` / `srbi-3b` -> B7a / B7b rekap transaksi harian (Repo >= 2 minggu, SRBI sisa >= 3 bulan)
     - `mm-ois`     -> B8 Partisipasi Matchmaking OIS (sheet Kuotasi export DS Antasena)
-    - `srbi-ratio` -> B6 Rasio Penjualan SRBI Sekunder (rekap sekunder vs win perdana) + kalender hari kerja
     Bila `file` tidak dikirim, dipakai file dari folder dataset ril lokal (REAL_DATASET_DIR).
     Periode evaluasi ditentukan dari tanggal di dalam file, lalu dijadikan periode aktif.
     Hasil memuat cross-check terhadap rekap BI pada file yang sama.
@@ -380,7 +382,8 @@ async def ingest_real_source(
 
     period = _get_or_create_period(db, tahun, triwulan)
     ensure_period_unlocked(db, period.id)
-    if result.get("working_days"):
+    if result.get("working_days") and (source == "srbi-ratio" or not period.Working_Days_JSON):
+        # Kalender hari kerja: rekap transaksi BI menjadi acuan; sumber lain hanya mengisi bila belum ada
         period.Working_Days_JSON = json.dumps(result["working_days"])
     if result.get("sessions"):
         period.MM_OIS_Sessions_JSON = json.dumps(result["sessions"])
@@ -428,6 +431,7 @@ async def ingest_real_source(
             "differences": result["crosscheck"],
         },
         "unknown_banks": result["unknown_banks"],
+        "source_notes": result.get("source_notes", []),
         "evaluation_summary": sync_result,
     }
 

@@ -240,7 +240,7 @@ export const DrillDownDrawer: React.FC = () => {
               <div className="flex items-center justify-between">
                 <h4 className="font-semibold text-xs text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
                   <TrendingDown className="w-4 h-4 text-rose-600" />
-                  Daftar Transaksi Gugur ({failedItems.length})
+                  Daftar Hari/Transaksi Gugur ({failedItems.length})
                 </h4>
               </div>
 
@@ -259,29 +259,54 @@ export const DrillDownDrawer: React.FC = () => {
                       </thead>
                       <tbody className="divide-y divide-slate-100">
                         {failedItems.map((item, idx) => {
-                          const idOrDate = item.deal_id || item.tanggal || `Item #${idx + 1}`
-                          const tenorOrSeri = item.tenor || item.seri || item.parameter || "-"
-                          const actualVal =
-                            item.spread_bps !== undefined
-                              ? `${item.spread_bps} bps`
-                              : item.tenor_hari !== undefined
-                              ? `${item.tenor_hari} hari`
-                              : item.realisasi_penjualan_sekunder !== undefined
-                              ? `Rp ${item.realisasi_penjualan_sekunder} M`
-                              : item.realisasi_line_du !== undefined
-                              ? `DU: ${item.realisasi_line_du}, Non: ${item.realisasi_line_non_du}`
-                              : "-"
+                          const rincian: any[] = Array.isArray(item.rincian) ? item.rincian : []
+                          const idOrDate =
+                            item.deal_id ||
+                            item.tanggal ||
+                            (item.hari_bertransaksi !== undefined ? "Satu triwulan" : `Item #${idx + 1}`)
+                          const tenorOrSeri = rincian.length
+                            ? rincian.map((r) => r.tenor).join(", ")
+                            : Array.isArray(item.tenor_tidak_dikuotasi)
+                            ? item.tenor_tidak_dikuotasi.join(", ")
+                            : item.tenor || item.seri || item.parameter || "-"
+                          const actualVal = rincian.length
+                            ? rincian.map((r) => (r.spread_bps === null || r.spread_bps === undefined ? "tidak ada" : `${r.spread_bps} bps`)).join(", ")
+                            : item.spread_bps !== undefined
+                            ? `${item.spread_bps} bps`
+                            : item.hari_bertransaksi !== undefined
+                            ? `${item.hari_bertransaksi} dari ${item.total_hari_kerja} hari`
+                            : item.tenor_hari !== undefined
+                            ? `${item.tenor_hari} hari`
+                            : item.realisasi_penjualan_sekunder_miliar !== undefined
+                            ? `Rp ${item.realisasi_penjualan_sekunder_miliar} M (${item.rasio_penjualan})`
+                            : item.realisasi_penjualan_sekunder !== undefined
+                            ? `Rp ${item.realisasi_penjualan_sekunder} M`
+                            : item.realisasi_line_du !== undefined
+                            ? `DU: ${item.realisasi_line_du}, Non: ${item.realisasi_line_non_du}`
+                            : Array.isArray(item.tenor_tidak_dikuotasi)
+                            ? "tidak ada kuotasi"
+                            : "-"
 
-                          const limitVal =
-                            item.max_allowed_bps !== undefined
-                              ? `Maks ${item.max_allowed_bps} bps`
-                              : item.min_allowed_tenor !== undefined
-                              ? `Min ${item.min_allowed_tenor} hari`
-                              : item.target_kewajiban_30pct !== undefined
-                              ? `Min Rp ${item.target_kewajiban_30pct} M`
-                              : item.target_line_du !== undefined
-                              ? `Min 10 DU & 10 Non-DU`
-                              : "-"
+                          const batasList = rincian.filter((r) => r.batas_bps !== undefined).map((r) => r.batas_bps)
+                          const limitVal = batasList.length
+                            ? `Maks ${Array.from(new Set(batasList)).join("/")} bps`
+                            : rincian.length
+                            ? "Kuotasi dua sisi"
+                            : item.max_allowed_bps !== undefined
+                            ? `Maks ${item.max_allowed_bps} bps`
+                            : item.target_hari !== undefined
+                            ? `Min ${item.target_hari} hari (60%)`
+                            : item.min_allowed_tenor !== undefined
+                            ? `Min ${item.min_allowed_tenor} hari`
+                            : item.target_kewajiban_30pct_miliar !== undefined
+                            ? `Min Rp ${item.target_kewajiban_30pct_miliar} M (30%)`
+                            : item.target_kewajiban_30pct !== undefined
+                            ? `Min Rp ${item.target_kewajiban_30pct} M`
+                            : item.target_line_du !== undefined
+                            ? `Min 10 DU & 10 Non-DU`
+                            : Array.isArray(item.tenor_tidak_dikuotasi)
+                            ? "1 bulan & 3 bulan"
+                            : "-"
 
                           return (
                             <tr key={idx} className="hover:bg-rose-50/40 transition-colors">
@@ -310,7 +335,7 @@ export const DrillDownDrawer: React.FC = () => {
               ) : (
                 <div className="p-5 text-center bg-slate-50 rounded-xl border border-slate-200 text-xs text-slate-500 flex flex-col items-center">
                   <CheckCircle className="w-6 h-6 text-emerald-600 mb-1" />
-                  <span className="font-semibold text-slate-700">Tidak Ada Transaksi Gugur</span>
+                  <span className="font-semibold text-slate-700">Tidak Ada Hari/Transaksi Gugur</span>
                 </div>
               )}
             </div>

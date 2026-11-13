@@ -22,13 +22,13 @@ Tugas Anda adalah memvalidasi sanggahan dan bukti dokumen yang diajukan oleh ban
 ATURAN BISNIS & KRITERIA VALIDASI MUTLAK:
 1. B1 (Kuotasi Repo): Setiap hari kerja; spread maksimal 5 bps (tenor O/N) dan maksimal 20 bps (tenor 1W dan 1M).
 2. B2 (Kuotasi SRBI): Setiap hari kerja; seri SRBI tradable; spread kuotasi maksimal 20 bps.
-3. B3 (Kuotasi OIS): Setiap hari kerja; kuotasi lengkap tenor 1M dan 3M; spread maksimal 20 bps. Kuotasi wajib tayang aktif di platform resmi pasar.
+3. B3 (Kuotasi OIS): Setiap hari kerja; kuotasi lengkap tenor 3 bulan dan 12 bulan; spread maksimal 20 bps. Kuotasi wajib tayang aktif di platform resmi pasar.
 4. B4 (Counterparty Line Repo): Fasilitas aktif minimal 10 bank DU dan 10 bank Non-DU pada akhir periode cut-off. Rasio pemenuhan = (min(DU/10, 1)*50% + min(NonDU/10, 1)*50%).
 5. B5 (Counterparty Line OIS): Fasilitas aktif minimal 10 bank DU pada akhir periode cut-off.
 6. B6 (Penjualan SRBI Sekunder): Minimal 30% dari volume win lelang pasar perdana dengan status SETTLED sebelum cut-off akhir periode.
-7. B7a (Transaksi Repo Sekunder): Transaksi repo wajib memiliki tenor minimal 2 minggu (>= 14 hari). Transaksi dengan tenor di bawah 14 hari (misal 7 hari) GUGUR dan tidak dapat dihitung. Minimal dilakukan pada 60% hari kerja (36 hari kerja).
-8. B7b (Transaksi SRBI Sekunder): Transaksi SRBI wajib memiliki sisa jangka waktu minimal 3 bulan pada minimal 60% hari kerja (36 hari kerja).
-9. B8 (Matchmaking OIS): Kehadiran dan kuotasi aktif pada tenor 1M dan 3M pada setiap sesi matchmaking resmi (6 periode).
+7. B7a (Transaksi Repo Sekunder): Transaksi repo wajib memiliki tenor minimal 2 minggu (>= 14 hari). Transaksi dengan tenor di bawah 14 hari (misal 7 hari) GUGUR dan tidak dapat dihitung. Minimal dilakukan pada 60% hari kerja.
+8. B7b (Transaksi SRBI Sekunder): Transaksi SRBI wajib memiliki sisa jangka waktu minimal 3 bulan pada minimal 60% hari kerja.
+9. B8 (Matchmaking OIS): Kehadiran dan kuotasi aktif pada tenor 1 bulan dan 3 bulan pada setiap sesi matchmaking resmi.
 
 Pedoman Analisis:
 - Periksa kesesuaian klaim bank dan bukti dokumen terhadap batas-batas kuantitatif regulasi di atas.

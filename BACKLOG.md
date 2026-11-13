@@ -51,10 +51,10 @@ Fokusnya otomasi proses, bukan AI.
 
 | ID | Story | Kriteria terima | P | Size |
 |---|---|---|---|---|
-| E1-1 | Sebagai petugas BI, saya upload 3 workbook raw BBG (Repo, SRBI, OIS) dan sistem membaca **sheet per bank**. | Header 6 baris di-skip, kolom bid/ask per ticker terbaca, `#N/A` = tidak ada kuotasi. | P0 | M |
-| E1-2 | Sistem memetakan **ticker → tenor/seri** dari sheet `Listing WS` (mis. Repo O/N, 1 Week, 1 Month). | Repo: O/N, 1W, 1M dievaluasi; OIS: 1b, 3b; SRBI: seri tradable. | P0 | M |
-| E1-3 | Sistem menghitung **spread** = \|bid − ask\| × 100 bps dan **hari valid** per aturan (Repo O/N ≤ 5, 1W/1M ≤ 20; SRBI ≤ 20; OIS 1b & 3b ≤ 20). | Golden test vs `Kuotasi BBG/*_FINAL.xlsx` lolos untuk 21 bank. | P0 | L |
-| E1-4 | Rincian hari gugur (tanggal, tenor, spread) tersedia untuk drill-down dan workbook konfirmasi. | Drawer menampilkan hari gugur dari data ril. | P0 | S |
+| ✅ E1-1 | Sebagai petugas BI, saya upload 3 workbook raw BBG (Repo, SRBI, OIS) dan sistem membaca **sheet per bank**. | Header 6 baris di-skip, kolom bid/ask per ticker terbaca, `#N/A` = tidak ada kuotasi. | P0 | M |
+| ✅ E1-2 | Sistem memetakan **ticker → tenor/seri** dari sheet `Listing WS` (mis. Repo O/N, 1 Week, 1 Month). | Repo: O/N, 1W, 1M dievaluasi; OIS: **3 bulan & 12 bulan** (`IHSWOOC`, `IHSWOO1`); SRBI: seluruh seri yang dikuotasi. | P0 | M |
+| ✅ E1-3 | Sistem menghitung **spread** = \|bid − ask\| × 100 bps dan **hari valid** per aturan (Repo O/N ≤ 5, 1W/1M ≤ 20; SRBI ≤ 20 untuk **spread maksimum** antar seri; OIS 3b & 12b ≤ 20). | Golden test vs `Kuotasi BBG/*_FINAL.xlsx` lolos untuk 21 bank. | P0 | L |
+| ✅ E1-4 | Rincian hari gugur (tanggal, tenor, spread) tersedia untuk drill-down dan workbook konfirmasi. | Drawer menampilkan hari gugur dari data ril. | P0 | S |
 
 ### E2 — Ingest Matchmaking OIS (B8)
 
@@ -67,9 +67,9 @@ Fokusnya otomasi proses, bukan AI.
 
 | ID | Story | Kriteria terima | P | Size |
 |---|---|---|---|---|
-| E3-1 | Upload rekap **Repo 2m** dan **SRBI 3b** (matriks tanggal × bank, volume harian). | Hari dengan volume > 0 dihitung; % terhadap target 60% hari kerja; golden test lolos. | P0 | M |
+| ✅ E3-1 | Upload rekap **Repo 2m** dan **SRBI 3b** (matriks tanggal × bank, volume harian). | Hari dengan volume > 0 dihitung; % terhadap target 60% hari kerja; golden test lolos. | P0 | M |
 | ✅ E3-2 | Upload rekap **SRBI Rasio Primer** (jual sekunder vs perdana per bank). | Rasio = sekunder ÷ perdana; kewajiban ≥ 30%; pemenuhan vs threshold tahap. | P0 | S |
-| E3-3 | Hapus logika lama berbasis HARTIS per-transaksi (tenor per deal) yang tidak punya data ril. | Rule engine B6/B7 memakai input rekap; sanggahan B7 berbasis per tanggal. | P0 | S |
+| ◐ E3-3 | Hapus logika lama berbasis HARTIS per-transaksi (tenor per deal) yang tidak punya data ril. | Rule engine B6/B7 memakai input rekap; sanggahan B7 berbasis per tanggal. **Status:** data ril B6/B7 sudah lewat rekap; logika HARTIS tinggal dipakai dataset sample TW II dan dihapus bersama sample (E0-1 lanjutan, Sprint 5). | P0 | S |
 
 ### E4 — Counterparty line (B4, B5)
 
@@ -137,7 +137,7 @@ Asumsi ±1 minggu per sprint, satu orang.
 | Sprint | Fokus | Item | Hasil yang bisa didemokan |
 |---|---|---|---|
 | 1 ✅ | Fondasi + data paling "ril" | E0-1, E0-2, E0-3, E2-1, E2-2, E3-2, E8-1, E8-2 | B6 & B8 dihitung dari data TW III ril; OM hilang |
-| 2 | Parser terberat | E1-1 s.d. E1-4, E3-1, E3-3 | Matriks B1–B3, B6–B8 dari data ril, lolos golden test |
+| 2 ✅ | Parser terberat | E1-1 s.d. E1-4, E3-1, E3-3 | Matriks B1–B3, B6–B8 dari data ril, lolos golden test |
 | 3 | Siklus konfirmasi | E4-1, E4-2, E5-1 | Counterparty line dari balasan bank; workbook konfirmasi ter-generate |
 | 4 | Rekonsiliasi | E6-1, E6-2, E6-3, E7-1, E7-3, E7-4 | Balasan bank ril diimpor → tiket otomatis → keputusan |
 | 5 | Finalisasi | E9-1, E10-1, E10-3, sisa P1 | Demo end-to-end + dokumen akhir |
@@ -161,3 +161,26 @@ Bila waktu sempit, potong dari bawah: P2 → P1 → E6-1 fuzzy (ganti mapping ma
 5. Rasio SRBI 30% dihitung **kumulatif satu triwulan**.
 6. Portal **hanya untuk internal BI**.
 7. OM **dihapus dulu**; skor akhir maks 60%, tindak lanjut dibahas lagi.
+
+## 7. Catatan Sprint 2 (13 Nov 2026)
+
+Hasil dari data ril TW III (golden test `backend/test_real_ingest.py`):
+
+| Param | Hasil | Selisih vs rekap BI |
+|---|---|---|
+| B1 Repo | BRI 96,9% (15 Jul, 15 Sep), Deutsche 98,4% (1W 21 Jul 210 bps), HSBC 96,9% (1M 8 Jul, 27 Agu) | 0 |
+| B2 SRBI | HSBC 75% (16 hari), Deutsche 87,5%, BRI 96,9%, BTN 98,4% (13 Jul 85 bps) | 9 (BRI 8 Jul, Deutsche 8 hari) |
+| B3 OIS | Deutsche 15,6%, BCA 96,9% (16 Jul, 6 Agu), Mega 98,4% | 1 tanggal (Mega 14 Jul) |
+| B7a/B7b | 21 bank ≥ 60% hari kerja (target 38 dari 64 hari) | 0 |
+
+Temuan akhir sistem: **Deutsche B3** dan **HSBC B2**, sama dengan lampiran M.01 BI. B4/B5 menunggu Sprint 3.
+
+Aturan yang ditemukan dari data (bukan dari dokumen):
+- SRBI dinilai dengan **spread maksimum** seluruh seri yang dikuotasi hari itu (kolom "Spread Maks" BI), bukan spread terbaik.
+- Tenor OIS yang dievaluasi adalah **3 bulan & 12 bulan**, bukan 1M & 3M seperti teks lama di aplikasi.
+- Ticker Bloomberg DBS (OIS, SRBI) dan Deutsche (OIS) berstatus `#N/A Invalid Security`. BI mengisi rekapnya dari sumber lain. Sistem memakai Rekap BI untuk bank tersebut dan menandainya "perlu verifikasi sumber". DBS Repo memakai sheet `DBSI_ref`.
+
+Pertanyaan untuk mentor:
+1. Dari mana data kuotasi DBS (OIS & SRBI) dan Deutsche (OIS) diperoleh bila ticker Bloomberg tidak valid?
+2. Deutsche SRBI 3 Agu: seri `YX765088` spread 29 bps, tetapi rekap BI mencatat 20 bps. Apakah ada seri yang dikecualikan (mis. bukan seri tradable)?
+3. Selisih BRI Repo (15 Jul, 15 Sep) hilang di rekap BBG+SPPA. Perlukah data SPPA diunggah sebagai sumber tambahan B1?
