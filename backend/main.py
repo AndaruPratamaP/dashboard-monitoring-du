@@ -1,14 +1,17 @@
 import io
 import os
 import re
+import glob
 import json
 import shutil
+import mimetypes
+from urllib.parse import quote
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, HTTPException, Query, UploadFile, File, Form, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 import pandas as pd
@@ -20,7 +23,10 @@ except ImportError:
     pass
 
 from database import engine, Base, get_db, ensure_schema
-from models import get_active_period, MasterBank, EvaluationPeriod, BankScoreMatrix, FindingTicket, AuditTrail
+from models import (
+    get_active_period, MasterBank, EvaluationPeriod, BankScoreMatrix, FindingTicket, AuditTrail,
+    SourceDataset, CounterpartyLine, ConfirmationRound, BankReply, DisputeItem,
+)
 from seed import seed_database, get_dataset_folder
 from services.entity_resolution import EntityResolver
 from services.rule_engine import (
@@ -44,8 +50,13 @@ from services.rule_engine import (
 # Periode dataset sample sintetis (dipakai parser lama untuk B1-B5, B7 sampai parser data ril selesai)
 SAMPLE_PERIOD = "2026-Q2"
 from services.worksheet_splitter import generate_bank_worksheet
-from services.ai_reconciliation import analyze_dispute_with_ai
-from services.real_ingest import INGESTERS, SOURCES, IngestError, find_default_file, period_from_dates
+from services.precheck import precheck_dispute, precheck_item, ENGINE_NAME as PRECHECK_ENGINE
+from services.real_ingest import (
+    INGESTERS, SOURCES, QUOTE_SOURCES, IngestError, find_default_file, period_from_dates, default_dataset_dir,
+)
+from services import replies as replies_service
+from services import counterparty as cp_service
+from services.confirmation_workbook import build_confirmation_workbook, confirmation_file_name
 from services.doc_generator import (
     generate_memo_docx,
     generate_attachments_xlsx,
@@ -389,6 +400,20 @@ async def ingest_real_source(
         period.MM_OIS_Sessions_JSON = json.dumps(result["sessions"])
     _set_active_period(db, period)
 
+    # Item sanggahan yang sudah DITERIMA tetap berlaku saat sumber data diproses ulang
+    for (b_id, src), acc in replies_service.accepted_overrides(db, period.id).items():
+        if src == source and b_id in result.get("daily", {}):
+            rate, det = replies_service.rate_with_overrides(source, result["daily"][b_id], acc)
+            bd = result["breakdown"].setdefault(b_id, {}).setdefault(result["param"], {})
+            bd.update({**det, "rate_sebelum_sanggahan": bd.get("rate"), "rate": rate, "sanggahan_diterima": len(acc)})
+            result["raw_metrics"].setdefault(b_id, {})[result["param"]] = rate
+
+    # Simpan data harian per bank (bahan workbook konfirmasi + jejak file sumber)
+    db.query(SourceDataset).filter(SourceDataset.period_id == period.id, SourceDataset.Source == source).delete()
+    for bank_id, payload in result.get("daily", {}).items():
+        db.add(SourceDataset(period_id=period.id, Source=source, Bank_ID=bank_id,
+                             Payload_JSON=json.dumps(payload), File_Name=file_name))
+
     sync_result = evaluate_and_sync_database(
         db=db,
         stage=period.Active_Threshold_Stage or "EARLY",
@@ -432,8 +457,553 @@ async def ingest_real_source(
         },
         "unknown_banks": result["unknown_banks"],
         "source_notes": result.get("source_notes", []),
+        "threshold_notes": result.get("threshold_notes", []),
         "evaluation_summary": sync_result,
     }
+
+
+def _sync_counterparty(db: Session, period: EvaluationPeriod) -> Dict[str, Any]:
+    metrics = cp_service.compute_metrics(db, period.id)
+    sync = evaluate_and_sync_database(
+        db=db,
+        stage=period.Active_Threshold_Stage or "EARLY",
+        period_id=period.id,
+        raw_metrics=metrics["raw_metrics"],
+        failed_transactions=metrics["failed"],
+        breakdown_stats=metrics["breakdown"],
+    )
+    return {"metrics": metrics, "sync": sync}
+
+
+def _counterparty_summary(db: Session, metrics: Dict[str, Any]) -> List[Dict[str, Any]]:
+    rows = []
+    for b in db.query(MasterBank).order_by(MasterBank.Bank_ID).all():
+        bd = metrics["breakdown"].get(b.Bank_ID, {})
+        rows.append({
+            "bank_id": b.Bank_ID, "nama_singkat": b.Nama_Singkat, "masked_alias": b.Masked_Alias,
+            "B4": bd.get("B4"), "B5": bd.get("B5"),
+        })
+    return rows
+
+
+@app.post("/api/counterparty/ingest")
+async def ingest_counterparty(
+    files: Optional[List[UploadFile]] = File(None),
+    db: Session = Depends(get_db),
+):
+    """
+    B4/B5 Counterparty line dari workbook konfirmasi.
+    - Dengan `files`: tiap workbook (kiriman BI atau balasan bank) mengganti daftar line bank tsb.
+    - Tanpa `files`: baca folder dataset ril lokal, `Konfirmasi Bank/*.xlsx` lalu balasan di `[Confirmed]*/**`.
+    Periode = periode aktif (unggah data transaksi/kuotasi lebih dulu agar periode ril terbentuk).
+    """
+    period = get_active_period(db)
+    if period is None:
+        raise HTTPException(status_code=400, detail="Belum ada periode evaluasi.")
+    if period.Triwulan == SAMPLE_PERIOD:
+        raise HTTPException(status_code=400, detail="Periode aktif adalah data sample. Unggah data transaksi/kuotasi ril lebih dulu.")
+    ensure_period_unlocked(db, period.id)
+
+    if files:
+        sources = [(f.filename, io.BytesIO(await f.read())) for f in files if f and f.filename]
+    else:
+        paths = cp_service.local_workbook_files(default_dataset_dir())
+        if not paths:
+            raise HTTPException(status_code=400, detail=f"Tidak ada workbook konfirmasi di folder dataset ril ({default_dataset_dir()}).")
+        sources = [(p, p) for p in paths]
+
+    applied = cp_service.apply_workbooks(db, period.id, sources, EntityResolver(db))
+    result = _sync_counterparty(db, period)
+    db.add(AuditTrail(
+        action="INGEST_COUNTERPARTY",
+        performed_by="Petugas BI DPPK",
+        details=(f"Counterparty line periode {period.Triwulan}: {len(applied['applied'])} workbook diterapkan, "
+                 f"{len(applied['skipped'])} dilewati."),
+    ))
+    db.commit()
+    return {
+        "status": "success",
+        "period": _period_payload(period),
+        "applied": applied["applied"],
+        "skipped": applied["skipped"],
+        "per_bank": _counterparty_summary(db, result["metrics"]),
+        "evaluation_summary": result["sync"],
+    }
+
+
+@app.get("/api/counterparty/{bank_id}")
+def list_counterparty_lines(bank_id: str, db: Session = Depends(get_db)):
+    """Daftar counterparty line bank pada periode aktif (untuk koreksi petugas)."""
+    period = get_active_period(db)
+    du_sandi = {b.Sandi_BI.zfill(3) for b in db.query(MasterBank).all() if b.Sandi_BI}
+    lines = db.query(CounterpartyLine).filter(
+        CounterpartyLine.period_id == period.id, CounterpartyLine.Bank_ID == bank_id
+    ).order_by(CounterpartyLine.Instrument, CounterpartyLine.Counterparty_Sandi).all()
+    return [{
+        "id": l.id, "instrument": l.Instrument, "sandi": l.Counterparty_Sandi, "nama": l.Counterparty_Nama,
+        "status": l.Status, "is_du": l.Counterparty_Sandi in du_sandi, "dihapus": cp_service.is_deleted(l.Status),
+        "setelah_cutoff": cp_service.is_after_cutoff(l.Status),
+        "source_file": l.Source_File, "dikonfirmasi_bank": l.Confirmed_By_Bank,
+    } for l in lines]
+
+
+@app.patch("/api/counterparty/lines/{line_id}")
+def update_counterparty_line(line_id: int, status_value: str = Form("", alias="status"), db: Session = Depends(get_db)):
+    """Koreksi status satu line oleh petugas BI (mis. menandai 'Dihapus'), lalu hitung ulang B4/B5."""
+    line = db.get(CounterpartyLine, line_id)
+    if line is None:
+        raise HTTPException(status_code=404, detail="Line tidak ditemukan.")
+    ensure_period_unlocked(db, line.period_id)
+    old = line.Status
+    line.Status = status_value.strip() or None
+    db.flush()
+    period = db.get(EvaluationPeriod, line.period_id)
+    result = _sync_counterparty(db, period)
+    db.add(AuditTrail(
+        action="CORRECT_COUNTERPARTY",
+        performed_by="Petugas BI DPPK",
+        details=f"{line.Bank_ID} {line.Instrument} {line.Counterparty_Nama}: status '{old}' -> '{line.Status}'.",
+    ))
+    db.commit()
+    return {"status": "success", "breakdown": result["metrics"]["breakdown"].get(line.Bank_ID, {})}
+
+
+@app.get("/api/confirmation/{bank_id}")
+def download_confirmation_workbook(bank_id: str, db: Session = Depends(get_db)):
+    """Workbook konfirmasi untuk satu bank (format template DPPK) dari data periode aktif."""
+    bank = db.get(MasterBank, bank_id)
+    if bank is None:
+        raise HTTPException(status_code=404, detail="Bank tidak ditemukan.")
+    period = get_active_period(db)
+    buf = build_confirmation_workbook(db, period, bank)
+    name = confirmation_file_name(bank)
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{name}"'},
+    )
+
+
+@app.get("/api/confirmation-all")
+def download_all_confirmation_workbooks(db: Session = Depends(get_db)):
+    """ZIP berisi workbook konfirmasi ke-21 bank, bernama 'NN. Nama Bank.xlsx'."""
+    import zipfile
+    period = get_active_period(db)
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+        for bank in db.query(MasterBank).order_by(MasterBank.No_Urut_Konfirmasi).all():
+            z.writestr(confirmation_file_name(bank), build_confirmation_workbook(db, period, bank).getvalue())
+    out.seek(0)
+    return StreamingResponse(
+        out, media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="Konfirmasi Bank {period.Triwulan}.zip"'},
+    )
+
+
+# ==============================================================================
+# 3c. BALASAN BANK, RONDE KONFIRMASI & ITEM SANGGAHAN (Sprint 4)
+# ==============================================================================
+ESCALATE_AFTER_ROUNDS = 2  # item yang masih diperdebatkan sejak >= 2 ronde -> perlu keputusan pimpinan
+
+
+def _current_round(db: Session, period: EvaluationPeriod, create: bool = True) -> Optional[ConfirmationRound]:
+    rnd = (db.query(ConfirmationRound).filter(ConfirmationRound.period_id == period.id)
+           .order_by(ConfirmationRound.Round_No.desc()).first())
+    if rnd is None and create:
+        rnd = ConfirmationRound(period_id=period.id, Round_No=1, Note="Ronde pertama (dibuat otomatis saat impor balasan)")
+        db.add(rnd)
+        db.flush()
+    return rnd
+
+
+def _round_payload(r: ConfirmationRound) -> Dict[str, Any]:
+    return {"round_no": r.Round_No, "opened_at": r.Opened_At.isoformat() if r.Opened_At else None,
+            "deadline": r.Deadline, "note": r.Note}
+
+
+def _real_period_or_400(db: Session) -> EvaluationPeriod:
+    period = get_active_period(db)
+    if period is None or not period.Working_Days_JSON:
+        raise HTTPException(status_code=400, detail="Periode aktif belum memuat data ril. Proses file sumber terlebih dahulu.")
+    ensure_period_unlocked(db, period.id)
+    return period
+
+
+def _history(item: DisputeItem, event: str, by: str, text: Optional[str] = None) -> None:
+    hist = json.loads(item.History_JSON or "[]")
+    hist.append({"at": datetime.utcnow().isoformat(timespec="seconds"), "ronde": item.Last_Round,
+                 "event": event, "oleh": by, "catatan": text})
+    item.History_JSON = json.dumps(hist)
+
+
+def _upsert_items(db: Session, period: EvaluationPeriod, bank_id: str, items: List[Dict[str, Any]],
+                  file_name: str, round_no: int) -> Dict[str, int]:
+    """Simpan item sanggahan; item yang sama (bank, sumber, tanggal, tenor) diperbarui, bukan diduplikasi."""
+    created = updated = reopened = 0
+    for it in items:
+        row = db.query(DisputeItem).filter(
+            DisputeItem.period_id == period.id, DisputeItem.Bank_ID == bank_id,
+            DisputeItem.Source == it["source"], DisputeItem.Tanggal == it["tanggal"], DisputeItem.Tenor == it["tenor"],
+        ).first()
+        if row is None:
+            row = DisputeItem(
+                period_id=period.id, Bank_ID=bank_id, Parameter_Code=it["param"], Source=it["source"],
+                Tanggal=it["tanggal"], Tenor=it["tenor"], Nilai_BI=it["nilai_bi"], Nilai_Bank=it["nilai_bank"],
+                Klaim_Bank_JSON=json.dumps(it["klaim"]) if it.get("klaim") else None,
+                Keterangan_Bank=it["keterangan"], Source_File=file_name,
+                Round_No=round_no, Last_Round=round_no, Status="OPEN",
+            )
+            db.add(row)
+            _history(row, "DIAJUKAN", f"Bank ({bank_id})", it["keterangan"])
+            created += 1
+        else:
+            if it["nilai_bank"] != "klaim di catatan/bukti" or not row.Nilai_Bank:
+                row.Nilai_Bank = it["nilai_bank"]
+            if it.get("klaim"):
+                row.Klaim_Bank_JSON = json.dumps(it["klaim"])
+            if it["keterangan"] and it["keterangan"] not in (row.Keterangan_Bank or ""):
+                row.Keterangan_Bank = "; ".join(x for x in (row.Keterangan_Bank, it["keterangan"]) if x)[:2000]
+            row.Source_File = file_name
+            if round_no > row.Last_Round:
+                row.Last_Round = round_no
+                if row.Status == "DITOLAK":
+                    row.Status = "OPEN"  # bank kembali menyanggah pada ronde baru
+                    _history(row, "DIAJUKAN_ULANG", f"Bank ({bank_id})", it["keterangan"])
+                    reopened += 1
+            updated += 1
+        db.flush()
+    return {"baru": created, "diperbarui": updated, "dibuka_ulang": reopened}
+
+
+def _apply_dispute_rate(db: Session, period: EvaluationPeriod, bank_id: str, source: str) -> Optional[Dict[str, Any]]:
+    """Hitung ulang nilai parameter dari data harian BI + item DITERIMA, lalu sinkronkan matriks."""
+    ds = db.query(SourceDataset).filter(SourceDataset.period_id == period.id, SourceDataset.Source == source,
+                                        SourceDataset.Bank_ID == bank_id).first()
+    if ds is None:
+        return None
+    acc = replies_service.accepted_overrides(db, period.id, bank_id).get((bank_id, source), [])
+    rate, detail = replies_service.rate_with_overrides(source, json.loads(ds.Payload_JSON), acc)
+    param = replies_service.PARAM_OF[source]
+    entry = db.query(BankScoreMatrix).filter(BankScoreMatrix.period_id == period.id,
+                                             BankScoreMatrix.Bank_ID == bank_id).first()
+    current = json.loads(entry.detail_metrics_json or "{}").get(param, {}) if entry else {}
+    if "rate_sebelum_sanggahan" not in current:
+        current["rate_sebelum_sanggahan"] = current.get("rate")
+    current.update(detail)
+    current["rate"] = rate
+    current["sanggahan_diterima"] = len(acc)
+    evaluate_and_sync_database(
+        db=db, stage=period.Active_Threshold_Stage or "EARLY", period_id=period.id,
+        raw_metrics={bank_id: {param: rate}}, breakdown_stats={bank_id: {param: current}},
+    )
+    return {"param": param, "rate": rate, "sanggahan_diterima": len(acc)}
+
+
+def _reply_files_local() -> List[str]:
+    root = default_dataset_dir()
+    folders = [p for p in glob.glob(os.path.join(glob.escape(root), "*Confirmed*")) if os.path.isdir(p)]
+    files = []
+    for f in folders:
+        for dirpath, _, names in os.walk(f):
+            files += [os.path.join(dirpath, n) for n in names if not n.startswith("~$")]
+    return sorted(files)
+
+
+@app.get("/api/rounds")
+def list_rounds(db: Session = Depends(get_db)):
+    period = get_active_period(db)
+    rows = (db.query(ConfirmationRound).filter(ConfirmationRound.period_id == period.id)
+            .order_by(ConfirmationRound.Round_No).all()) if period else []
+    return [_round_payload(r) for r in rows]
+
+
+@app.post("/api/rounds")
+def open_round(deadline: Optional[str] = Form(None), note: Optional[str] = Form(None), db: Session = Depends(get_db)):
+    """Buka ronde konfirmasi baru (mis. setelah tanggapan BI dikirim ulang ke bank) dengan tenggat balasan."""
+    period = _real_period_or_400(db)
+    last = _current_round(db, period, create=False)
+    rnd = ConfirmationRound(period_id=period.id, Round_No=(last.Round_No + 1) if last else 1,
+                            Deadline=(deadline or None), Note=note)
+    db.add(rnd)
+    db.add(AuditTrail(action="OPEN_CONFIRMATION_ROUND", performed_by="Petugas BI DPPK",
+                      details=f"Ronde konfirmasi {rnd.Round_No} {period.Triwulan} dibuka; tenggat {deadline or '-'}."))
+    db.commit()
+    return _round_payload(rnd)
+
+
+@app.post("/api/replies/ingest")
+async def ingest_bank_replies(
+    files: Optional[List[UploadFile]] = File(None),
+    bank_id: Optional[str] = Form(None, description="Paksa bank pemilik file unggahan (opsional)"),
+    db: Session = Depends(get_db),
+):
+    """
+    Impor balasan bank pada ronde berjalan: workbook dibandingkan dengan data harian BI per tanggal,
+    bukti (PDF/gambar) dilampirkan, file yang tidak bisa diproses ditandai perlu tindakan manual.
+    Tanpa `files`, dipakai folder balasan lokal (`[Confirmed] ...`) pada dataset ril.
+    """
+    period = _real_period_or_400(db)
+    rnd = _current_round(db, period)
+    resolver = EntityResolver(db)
+    forced = db.get(MasterBank, bank_id) if bank_id else None
+    year = json.loads(period.Working_Days_JSON)[0][:4]
+
+    # (nama file, sumber bytes/path, path tersimpan)
+    entries: List[Tuple[str, Any, Optional[str]]] = []
+    if files:
+        target_dir = os.path.join(UPLOADS_DIR, "replies", period.Triwulan)
+        os.makedirs(target_dir, exist_ok=True)
+        for f in files:
+            if not f.filename:
+                continue
+            data = await f.read()
+            path = os.path.join(target_dir, os.path.basename(f.filename))
+            with open(path, "wb") as out:
+                out.write(data)
+            entries.append((os.path.basename(f.filename), path, path))
+    else:
+        entries = [(os.path.basename(p), p, p) for p in _reply_files_local()]
+    if not entries:
+        raise HTTPException(status_code=400, detail="Tidak ada file balasan yang ditemukan.")
+
+    # Kelompokkan per bank; bank file unggahan dikenali dari nama folder/file, isi sheet, atau pilihan petugas
+    by_bank: Dict[str, Dict[str, list]] = {}
+    unassigned = []
+    opened: Dict[str, Any] = {}
+    for name, src, stored in entries:
+        kind = replies_service.file_kind(name)
+        bank = forced or replies_service.bank_for_path(stored, resolver, db)
+        if bank is None and kind == "WORKBOOK":
+            try:
+                opened[stored] = replies_service.read_workbook(stored)
+                bank = replies_service.bank_from_sheets(opened[stored], resolver)
+            except ValueError:
+                pass
+        if bank is None:
+            unassigned.append({"file": name, "alasan": "bank pengirim tidak dikenali"})
+            continue
+        by_bank.setdefault(bank.Bank_ID, {"WORKBOOK": [], "BUKTI": [], "MANUAL": []})[kind].append((name, stored))
+
+    summary = []
+    for b_id, groups in sorted(by_bank.items()):
+        evidence = [n for n, _ in groups["BUKTI"]]
+        # Ronde sama + file sama -> ganti catatan lama (impor ulang idempoten)
+        names = [n for k in groups for n, _ in groups[k]]
+        db.query(BankReply).filter(BankReply.period_id == period.id, BankReply.Round_No == rnd.Round_No,
+                                   BankReply.Bank_ID == b_id, BankReply.File_Name.in_(names)).delete(synchronize_session=False)
+        bank_sum = {"bank_id": b_id, "workbook": [], "bukti": evidence, "manual": [], "item": {"baru": 0, "diperbarui": 0, "dibuka_ulang": 0}}
+        for n, stored in groups["BUKTI"]:
+            db.add(BankReply(period_id=period.id, Round_No=rnd.Round_No, Bank_ID=b_id, File_Name=n,
+                             Stored_Path=stored, Kind="BUKTI"))
+        for n, stored in groups["MANUAL"]:
+            reason = replies_service.manual_reason(n)
+            bank_sum["manual"].append({"file": n, "alasan": reason})
+            db.add(BankReply(period_id=period.id, Round_No=rnd.Round_No, Bank_ID=b_id, File_Name=n,
+                             Stored_Path=stored, Kind="MANUAL", Status_Note=reason))
+        for n, stored in groups["WORKBOOK"]:
+            try:
+                sheets = opened.get(stored) or replies_service.read_workbook(stored)
+            except ValueError as e:
+                bank_sum["manual"].append({"file": n, "alasan": str(e)})
+                db.add(BankReply(period_id=period.id, Round_No=rnd.Round_No, Bank_ID=b_id, File_Name=n,
+                                 Stored_Path=stored, Kind="MANUAL", Status_Note=str(e)))
+                continue
+            parsed = replies_service.parse_reply(sheets)
+            diff = replies_service.diff_reply(db, period.id, b_id, parsed, evidence, int(year))
+            counts = _upsert_items(db, period, b_id, diff["items"], n, rnd.Round_No)
+            for k, v in counts.items():
+                bank_sum["item"][k] += v
+            wb_sum = {"file": n, "sheet": parsed["mapping"], "item": len(diff["items"]),
+                      "selisih_info": diff["info"], "catatan_bank": sorted({x for v in diff["notes"].values() for x in v})}
+            bank_sum["workbook"].append(wb_sum)
+            db.add(BankReply(period_id=period.id, Round_No=rnd.Round_No, Bank_ID=b_id, File_Name=n,
+                             Stored_Path=stored, Kind="WORKBOOK", Summary_JSON=json.dumps(wb_sum),
+                             Status_Note=None if parsed["data"] else "tidak memuat sheet kewajiban harian (mis. hanya counterparty)"))
+        summary.append(bank_sum)
+
+    total_new = sum(s["item"]["baru"] for s in summary)
+    db.add(AuditTrail(
+        action="IMPORT_BANK_REPLIES", performed_by="Petugas BI DPPK",
+        details=(f"Impor balasan ronde {rnd.Round_No} {period.Triwulan}: {len(entries)} file dari {len(summary)} bank; "
+                 f"{total_new} item sanggahan baru; "
+                 f"{sum(len(s['manual']) for s in summary)} file perlu tindakan manual."),
+    ))
+    db.commit()
+    return {"status": "success", "round": _round_payload(rnd), "per_bank": summary, "unassigned": unassigned}
+
+
+@app.get("/api/replies")
+def list_bank_replies(db: Session = Depends(get_db)):
+    """File balasan per bank pada periode aktif (workbook, bukti, perlu tindakan manual)."""
+    period = get_active_period(db)
+    if period is None:
+        return []
+    rows = db.query(BankReply).filter(BankReply.period_id == period.id).order_by(BankReply.Bank_ID, BankReply.Round_No).all()
+    return [{
+        "id": r.id, "bank_id": r.Bank_ID, "round_no": r.Round_No, "file": r.File_Name, "kind": r.Kind,
+        "status_note": r.Status_Note, "summary": json.loads(r.Summary_JSON) if r.Summary_JSON else None,
+        "received_at": r.Received_At.isoformat() if r.Received_At else None,
+    } for r in rows]
+
+
+@app.get("/api/replies/{reply_id}/file")
+def get_reply_file(reply_id: int, db: Session = Depends(get_db)):
+    """Berkas balasan/bukti untuk pratinjau in-app (PDF/gambar tampil inline)."""
+    r = db.get(BankReply, reply_id)
+    if r is None or not r.Stored_Path or not os.path.isfile(r.Stored_Path):
+        raise HTTPException(status_code=404, detail="Berkas tidak ditemukan.")
+    media = mimetypes.guess_type(r.File_Name)[0] or "application/octet-stream"
+    return FileResponse(r.Stored_Path, media_type=media,
+                        headers={"Content-Disposition": f'inline; filename="{quote(r.File_Name)}"'})
+
+
+@app.get("/api/disputes")
+def list_dispute_items(bank_id: Optional[str] = Query(None), db: Session = Depends(get_db)):
+    """
+    Item sanggahan per tanggal, dikelompokkan per bank & parameter, lengkap dengan pre-check PADG,
+    dampak bila diterima, dan tanda eskalasi (diperdebatkan >= 2 ronde).
+    """
+    period = get_active_period(db)
+    if period is None:
+        return {"round": None, "groups": []}
+    stage = period.Active_Threshold_Stage or "EARLY"
+    q = db.query(DisputeItem).filter(DisputeItem.period_id == period.id)
+    if bank_id:
+        q = q.filter(DisputeItem.Bank_ID == bank_id)
+    items = q.order_by(DisputeItem.Bank_ID, DisputeItem.Parameter_Code, DisputeItem.Tanggal, DisputeItem.Tenor).all()
+    banks = {b.Bank_ID: b for b in db.query(MasterBank).all()}
+    evidence = {}
+    for r in db.query(BankReply).filter(BankReply.period_id == period.id, BankReply.Kind == "BUKTI"):
+        evidence.setdefault(r.Bank_ID, []).append({"id": r.id, "file": r.File_Name})
+    matrix = {m.Bank_ID: m for m in db.query(BankScoreMatrix).filter(BankScoreMatrix.period_id == period.id)}
+
+    groups: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    for it in items:
+        key = (it.Bank_ID, it.Source)
+        if key not in groups:
+            ds = db.query(SourceDataset).filter(SourceDataset.period_id == period.id, SourceDataset.Source == it.Source,
+                                                SourceDataset.Bank_ID == it.Bank_ID).first()
+            payload = json.loads(ds.Payload_JSON) if ds else None
+            all_items = [x for x in items if (x.Bank_ID, x.Source) == key]
+            accepted = [x for x in all_items if x.Status == "DITERIMA"]
+            open_ = [x for x in all_items if x.Status == "OPEN"]
+            rate_base = replies_service.rate_with_overrides(it.Source, payload, [])[0] if payload else None
+            rate_now = replies_service.rate_with_overrides(it.Source, payload, accepted)[0] if payload else None
+            rate_all = replies_service.rate_with_overrides(it.Source, payload, accepted + open_)[0] if payload else None
+            m = matrix.get(it.Bank_ID)
+            b = banks[it.Bank_ID]
+            groups[key] = {
+                "bank_id": it.Bank_ID, "nama_singkat": b.Nama_Singkat, "masked_alias": b.Masked_Alias,
+                "parameter_code": it.Parameter_Code, "source": it.Source,
+                "label": replies_service.SOURCE_LABEL[it.Source],
+                "threshold": THRESHOLDS[stage].get(it.Parameter_Code, 80.0),
+                "rate_rekap_bi": rate_base, "rate_sekarang": rate_now, "rate_jika_semua_diterima": rate_all,
+                "status_parameter": None if m is None else getattr(m, f"{it.Parameter_Code.lower()}_passed"),
+                "bukti": evidence.get(it.Bank_ID, []),
+                "items": [], "_payload": payload, "_accepted": accepted, "_all": all_items,
+            }
+        g = groups[key]
+        max_bps = None
+        if it.Source in QUOTE_SOURCES and it.Tenor:
+            max_bps = next((t["max_bps"] for t in QUOTE_SOURCES[it.Source]["tenors"] if t["key"] == it.Tenor), None)
+        # Dampak dihitung bersama tenor lain pada tanggal yang sama: hari baru memenuhi bila semua tenornya diterima
+        same_day = [x for x in g["_all"] if x.Tanggal == it.Tanggal and x.Status != "DITOLAK"]
+        rate_one = (replies_service.rate_with_overrides(it.Source, g["_payload"], g["_accepted"] + same_day)[0]
+                    if g["_payload"] and it.Status != "DITERIMA" else g["rate_sekarang"])
+        pre = precheck_item(
+            {"nilai_bi": it.Nilai_BI, "nilai_bank": it.Nilai_Bank, "keterangan": it.Keterangan_Bank}, max_bps,
+            {"param": it.Parameter_Code, "rate_now": g["rate_sekarang"], "rate_if_accepted": rate_one,
+             "threshold": g["threshold"], "same_day": len(same_day)},
+        )
+        rounds = it.Last_Round - it.Round_No + 1
+        g["items"].append({
+            "id": it.id, "tanggal": it.Tanggal, "tenor": it.Tenor,
+            "tenor_label": replies_service.TENOR_LABEL.get(it.Tenor or "", it.Tenor),
+            "nilai_bi": it.Nilai_BI, "nilai_bank": it.Nilai_Bank, "keterangan_bank": it.Keterangan_Bank,
+            "source_file": it.Source_File, "round_no": it.Round_No, "last_round": it.Last_Round,
+            "status": it.Status, "decided_by": it.Decided_By, "decision_note": it.Decision_Note,
+            "decided_at": it.Decided_At.isoformat() if it.Decided_At else None,
+            "history": json.loads(it.History_JSON or "[]"), "precheck": pre,
+            "perlu_keputusan_pimpinan": it.Status == "OPEN" and rounds >= ESCALATE_AFTER_ROUNDS,
+        })
+    out = []
+    for g in groups.values():
+        g.pop("_payload"), g.pop("_accepted"), g.pop("_all")
+        g["jumlah"] = {s: sum(1 for x in g["items"] if x["status"] == s) for s in ("OPEN", "DITERIMA", "DITOLAK")}
+        out.append(g)
+    rnd = _current_round(db, period, create=False)
+    return {"round": _round_payload(rnd) if rnd else None, "stage": stage, "groups": out}
+
+
+@app.post("/api/disputes/{item_id}/decide")
+def decide_dispute_item(
+    item_id: int,
+    decision: str = Form(..., description="DITERIMA, DITOLAK, atau OPEN (batalkan keputusan)"),
+    note: Optional[str] = Form(None),
+    verified_by: Optional[str] = Form("Petugas BI DPPK"),
+    db: Session = Depends(get_db),
+):
+    """Keputusan petugas per item; nilai parameter dihitung ulang dari data harian + item yang diterima."""
+    dec = decision.upper().strip()
+    if dec not in ("DITERIMA", "DITOLAK", "OPEN"):
+        raise HTTPException(status_code=400, detail="Keputusan harus DITERIMA, DITOLAK, atau OPEN.")
+    item = db.get(DisputeItem, item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Item sanggahan tidak ditemukan.")
+    period = ensure_period_unlocked(db, item.period_id)
+    officer = verified_by or "Petugas BI DPPK"
+    old = item.Status
+    item.Status = dec
+    item.Decided_By = None if dec == "OPEN" else officer
+    item.Decided_At = None if dec == "OPEN" else datetime.utcnow()
+    item.Decision_Note = note
+    _history(item, {"DITERIMA": "DITERIMA", "DITOLAK": "DITOLAK", "OPEN": "KEPUTUSAN_DIBATALKAN"}[dec], officer, note)
+    db.flush()
+    result = _apply_dispute_rate(db, period, item.Bank_ID, item.Source)
+    db.add(AuditTrail(
+        action=f"DISPUTE_ITEM_{dec}", performed_by=officer,
+        details=(f"{item.Bank_ID} {item.Parameter_Code} {item.Tanggal or '(agregat)'} {item.Tenor or ''}: {old} -> {dec}. "
+                 f"Nilai {item.Parameter_Code} kini {result['rate'] if result else '-'}%. Catatan: {note or '-'}"),
+    ))
+    db.commit()
+    return {"status": "success", "item_id": item.id, "decision": dec, "parameter": result}
+
+
+@app.post("/api/disputes/manual")
+def add_manual_dispute(
+    bank_id: str = Form(...),
+    source: str = Form(..., description="bbg-repo, bbg-srbi, bbg-ois, repo-2m, srbi-3b, mm-ois"),
+    tanggal: str = Form(...),
+    tenor: Optional[str] = Form(None),
+    keterangan: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    """
+    Catat sanggahan yang tidak terbaca otomatis (mis. disampaikan lewat surat/email atau file ber-password).
+    Hanya untuk hari yang menurut data BI memang tidak memenuhi.
+    """
+    period = _real_period_or_400(db)
+    if source not in replies_service.PARAM_OF or source == "srbi-ratio":
+        raise HTTPException(status_code=400, detail="Sumber tidak valid untuk sanggahan per tanggal.")
+    ds = db.query(SourceDataset).filter(SourceDataset.period_id == period.id, SourceDataset.Source == source,
+                                        SourceDataset.Bank_ID == bank_id).first()
+    if ds is None:
+        raise HTTPException(status_code=400, detail="Data harian BI untuk bank & sumber ini belum ada.")
+    bad = replies_service.invalid_on(source, json.loads(ds.Payload_JSON), tanggal)
+    if tenor:
+        bad = [b for b in bad if b[0] == tenor]
+    if not bad:
+        raise HTTPException(status_code=400, detail=f"Menurut data BI, {tanggal} sudah memenuhi; tidak ada yang perlu disanggah.")
+    rnd = _current_round(db, period)
+    counts = _upsert_items(db, period, bank_id, [
+        {"source": source, "param": replies_service.PARAM_OF[source], "tanggal": tanggal, "tenor": t,
+         "nilai_bi": v, "nilai_bank": "klaim manual (dicatat petugas)", "keterangan": keterangan, "klaim": None}
+        for t, v in bad
+    ], "dicatat manual", rnd.Round_No)
+    db.add(AuditTrail(action="DISPUTE_ITEM_MANUAL", performed_by="Petugas BI DPPK",
+                      details=f"Sanggahan manual {bank_id} {source} {tanggal}: {keterangan}"))
+    db.commit()
+    return {"status": "success", **counts}
 
 
 @app.post("/api/evaluation/recalculate")
@@ -612,13 +1182,11 @@ async def submit_bank_dispute(
 
 
 @app.post("/api/reconciliation/{finding_id}/analyze")
-def analyze_finding_with_ai(finding_id: str, db: Session = Depends(get_db)):
+def precheck_finding(finding_id: str, db: Session = Depends(get_db)):
     """
-    AI Evidence Checker:
-    Memeriksa klaim bank dan bukti dokumen terhadap aturan mutlak PADG No. 23/2024.
-    Menggunakan Gemini API jika GEMINI_API_KEY tersedia,
-    atau Fallback Deterministic Rule Analyzer.
-    Nama bank di-masking ke alias demi kerahasiaan perbankan.
+    Pre-check PADG (deterministik) atas sanggahan tiket temuan: angka klaim vs threshold,
+    aturan tenor mutlak, kelengkapan bukti. Tidak memakai layanan AI eksternal dan tidak
+    pernah menyetujui sendiri; keputusan tetap di tangan petugas BI.
     """
     ticket = db.query(FindingTicket).join(MasterBank).filter(FindingTicket.Finding_ID == finding_id).first()
     if not ticket:
@@ -626,11 +1194,9 @@ def analyze_finding_with_ai(finding_id: str, db: Session = Depends(get_db)):
 
     period = ensure_period_unlocked(db, ticket.period_id)
     stage = period.Active_Threshold_Stage if period else "EARLY"
-
     failed_details = json.loads(ticket.Detail_Transaksi_Gugur) if ticket.Detail_Transaksi_Gugur else []
 
-    # Jalankan AI Evidence Checker
-    ai_result = analyze_dispute_with_ai(
+    result = precheck_dispute(
         finding_id=ticket.Finding_ID,
         bank_alias=ticket.bank.Masked_Alias,
         parameter_code=ticket.Parameter_Code,
@@ -641,26 +1207,23 @@ def analyze_finding_with_ai(finding_id: str, db: Session = Depends(get_db)):
         failed_details=failed_details,
         stage=stage,
     )
+    result["engine_used"] = PRECHECK_ENGINE
 
-    # Simpan hasil AI ke tiket
-    ticket.AI_Recommendation_Status = ai_result["recommendation_status"]
-    ticket.AI_Analysis_Text = ai_result["analysis_text"]
+    ticket.AI_Recommendation_Status = result["recommendation_status"]
+    ticket.AI_Analysis_Text = result["analysis_text"]
     ticket.Updated_At = datetime.utcnow()
-
-    # Catat di Audit Trail
-    audit = AuditTrail(
-        action="AI_VERIFICATION_ANALYSIS",
-        performed_by=f"AI Engine ({ai_result.get('engine_used', 'Gemini')})",
-        details=f"Analisis verifikasi bukti untuk {finding_id}: Status {ai_result['recommendation_status']}.",
-    )
-    db.add(audit)
+    db.add(AuditTrail(
+        action="PRECHECK_PADG",
+        performed_by=PRECHECK_ENGINE,
+        details=f"Pre-check sanggahan {finding_id}: {result['recommendation_status']}.",
+    ))
     db.commit()
 
     return {
         "status": "success",
         "finding_id": ticket.Finding_ID,
         "bank_alias": ticket.bank.Masked_Alias,
-        "ai_result": ai_result,
+        "ai_result": result,
         "updated_at": ticket.Updated_At.isoformat(),
     }
 

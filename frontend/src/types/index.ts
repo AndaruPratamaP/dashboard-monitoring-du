@@ -31,6 +31,10 @@ export interface MasterBank {
 }
 
 export interface ParameterMetricDetail {
+  sanggahan_diterima?: number
+  rate_sebelum_sanggahan?: number | null
+  sensitivitas_batas?: Array<{ tenor: string; batas_dipakai_bps: number; batas_alternatif_bps: number; hari_terdampak: Array<{ tanggal: string; spread_bps: number }>; rate_jika_alternatif: number; catatan: string }>
+  counterparty_setelah_cutoff?: string[]
   valid_days?: number
   total_days?: number
   rate?: number
@@ -119,7 +123,7 @@ export interface FindingTicketItem {
   file_bukti_name: string | null
   ai_recommendation_status: "RECOMMEND_APPROVE" | "RECOMMEND_REJECT" | "PARTIAL_REVIEW" | null
   ai_analysis_text: string | null
-  bi_decision_status: "OPEN" | "PENDING_REVIEW" | "APPROVED" | "REJECTED"
+  bi_decision_status: "OPEN" | "PENDING_REVIEW" | "APPROVED" | "REJECTED" | "CLOSED"
   verified_by: string | null
   updated_at: string
 }

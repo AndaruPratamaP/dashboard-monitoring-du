@@ -62,7 +62,7 @@ PARAMETER_NAMES = {
 }
 
 PARAMETER_DETAILS = {
-    "B1": "Setiap hari kerja; spread maks. 5 bps (O/N) & maks. 20 bps (1W, 1M)",
+    "B1": "Setiap hari kerja; spread maks. 5 bps (O/N) & maks. 20 bps (1W, 1M). Batas 1W menunggu konfirmasi (template BI: 10 bps)",
     "B2": "Setiap hari kerja; kuotasi dua sisi; spread maks. 20 bps untuk seluruh seri yang dikuotasi",
     "B3": "Setiap hari kerja; tenor 3 bulan & 12 bulan; spread maks. 20 bps",
     "B4": "Minimal 10 bank DU dan 10 bank non-DU pada akhir periode",
@@ -485,6 +485,7 @@ def evaluate_and_sync_database(
     banks = db.query(MasterBank).order_by(MasterBank.Bank_ID).all()
     created_findings = 0
     updated_findings = 0
+    closed_findings = []
     status_counts = {STATUS_MEMENUHI: 0, STATUS_TIDAK_MEMENUHI: 0, STATUS_DATA_BELUM_LENGKAP: 0}
 
     puva_codes = ["B1", "B2", "B3", "B4", "B5", "B6", "B7a", "B7b", "B8"]
@@ -582,8 +583,21 @@ def evaluate_and_sync_database(
                     ticket.Nilai_Rekap_BI = rekap_str
                     if gugur_json and not ticket.Detail_Transaksi_Gugur:
                         ticket.Detail_Transaksi_Gugur = gugur_json
+                    if ticket.BI_Decision_Status == "CLOSED":
+                        ticket.BI_Decision_Status = "OPEN"  # gagal lagi setelah sempat lolos -> temuan dibuka kembali
                     ticket.Updated_At = datetime.utcnow()
                     updated_findings += 1
+            elif is_passed is True:
+                # Parameter lolos (hasil sanggahan/rekalkulasi/ganti tahap) -> tiket terbuka ditutup otomatis
+                ticket = db.query(FindingTicket).filter(
+                    FindingTicket.Finding_ID == finding_id,
+                    FindingTicket.BI_Decision_Status.in_(["OPEN", "PENDING_REVIEW"]),
+                ).first()
+                if ticket:
+                    ticket.BI_Decision_Status = "CLOSED"
+                    ticket.Nilai_Rekap_BI = f"{raw_val:.2f}% (lolos threshold {stage_upper}: {threshold_val:.1f}%)"
+                    ticket.Updated_At = datetime.utcnow()
+                    closed_findings.append(finding_id)
 
     # Catat audit trail
     audit = AuditTrail(
@@ -593,6 +607,7 @@ def evaluate_and_sync_database(
             f"Evaluasi threshold tahap {stage_upper} ({period.Triwulan}) selesai. "
             f"Memenuhi: {status_counts[STATUS_MEMENUHI]}, Tidak memenuhi: {status_counts[STATUS_TIDAK_MEMENUHI]}, "
             f"Data belum lengkap: {status_counts[STATUS_DATA_BELUM_LENGKAP]}."
+            + (f" Tiket ditutup otomatis: {', '.join(closed_findings)}." if closed_findings else "")
         ),
     )
     db.add(audit)
@@ -607,4 +622,5 @@ def evaluate_and_sync_database(
         "data_belum_lengkap_count": status_counts[STATUS_DATA_BELUM_LENGKAP],
         "created_findings": created_findings,
         "updated_findings": updated_findings,
+        "closed_findings": closed_findings,
     }

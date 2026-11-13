@@ -127,7 +127,7 @@ class FindingTicket(Base):
     File_Bukti_Name = Column(String(255), nullable=True)
     AI_Recommendation_Status = Column(String(50), nullable=True)   # APPROVE / REJECT / PARTIAL_REVIEW
     AI_Analysis_Text = Column(Text, nullable=True)
-    BI_Decision_Status = Column(String(30), nullable=False, default="OPEN")  # OPEN / PENDING_REVIEW / APPROVED / REJECTED
+    BI_Decision_Status = Column(String(30), nullable=False, default="OPEN")  # OPEN / PENDING_REVIEW / APPROVED / REJECTED / CLOSED (lolos setelah rekalkulasi)
     Approved_Value = Column(Float, nullable=True)                  # Nilai realisasi (%) yang ditetapkan petugas BI saat APPROVED
     Verified_By = Column(String(100), nullable=True)
     Updated_At = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
@@ -145,6 +145,101 @@ class AuditTrail(Base):
     action = Column(String(100), nullable=False)
     performed_by = Column(String(100), default="System")
     details = Column(Text, nullable=True)
+
+
+class SourceDataset(Base):
+    """
+    Data harian per bank hasil ingest satu sumber (mis. volume Repo 2m harian, spread kuotasi per tenor).
+    Menjadi bahan workbook konfirmasi dan jejak file sumber setiap angka di matriks.
+    """
+    __tablename__ = "source_datasets"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    period_id = Column(Integer, ForeignKey("evaluation_periods.id"), nullable=False, index=True)
+    Source = Column(String(30), nullable=False, index=True)    # bbg-repo, repo-2m, mm-ois, ...
+    Bank_ID = Column(String(20), ForeignKey("master_banks.Bank_ID"), nullable=False, index=True)
+    Payload_JSON = Column(Text, nullable=False)
+    File_Name = Column(String(255), nullable=True)
+    Uploaded_At = Column(DateTime, default=datetime.datetime.utcnow)
+
+
+class CounterpartyLine(Base):
+    """Counterparty line Repo/OIS milik bank DU per periode (dari workbook konfirmasi & balasan bank)."""
+    __tablename__ = "counterparty_lines"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    period_id = Column(Integer, ForeignKey("evaluation_periods.id"), nullable=False, index=True)
+    Bank_ID = Column(String(20), ForeignKey("master_banks.Bank_ID"), nullable=False, index=True)
+    Instrument = Column(String(10), nullable=False)             # REPO / OIS
+    Counterparty_Sandi = Column(String(10), nullable=False)     # 002
+    Counterparty_Nama = Column(String(255), nullable=True)      # 002 - PT. BANK RAKYAT INDONESIA ...
+    Status = Column(String(100), nullable=True)                 # Sebelum/Setelah cut-off, Dihapus, kosong
+    Source_File = Column(String(255), nullable=True)
+    Confirmed_By_Bank = Column(Boolean, nullable=False, default=False)
+
+
+class BankDirectory(Base):
+    """Daftar bank (sandi + nama) untuk pilihan counterparty; diambil dari sheet Index workbook BI."""
+    __tablename__ = "bank_directory"
+
+    Sandi = Column(String(10), primary_key=True)
+    Nama = Column(String(255), nullable=False)                  # format "002 - PT. BANK ..."
+
+
+class ConfirmationRound(Base):
+    """Satu putaran kirim workbook konfirmasi -> balasan bank (ronde 1, 2, ...) dengan tenggat."""
+    __tablename__ = "confirmation_rounds"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    period_id = Column(Integer, ForeignKey("evaluation_periods.id"), nullable=False, index=True)
+    Round_No = Column(Integer, nullable=False)
+    Opened_At = Column(DateTime, default=datetime.datetime.utcnow)
+    Deadline = Column(String(10), nullable=True)                # YYYY-MM-DD
+    Note = Column(Text, nullable=True)
+
+
+class BankReply(Base):
+    """File balasan bank yang diterima pada satu ronde (workbook, bukti, atau file yang perlu tindakan manual)."""
+    __tablename__ = "bank_replies"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    period_id = Column(Integer, ForeignKey("evaluation_periods.id"), nullable=False, index=True)
+    Round_No = Column(Integer, nullable=False, default=1)
+    Bank_ID = Column(String(20), ForeignKey("master_banks.Bank_ID"), nullable=True, index=True)
+    File_Name = Column(String(255), nullable=False)
+    Stored_Path = Column(String(500), nullable=True)            # salinan lokal untuk pratinjau bukti
+    Kind = Column(String(20), nullable=False)                   # WORKBOOK / BUKTI / MANUAL
+    Status_Note = Column(Text, nullable=True)                   # alasan perlu tindakan manual / ringkasan sheet
+    Summary_JSON = Column(Text, nullable=True)
+    Received_At = Column(DateTime, default=datetime.datetime.utcnow)
+
+
+class DisputeItem(Base):
+    """
+    Satu selisih isian bank vs rekap BI per tanggal per kewajiban (tiket sanggahan otomatis).
+    Status: OPEN -> DITERIMA (hari dihitung memenuhi) / DITOLAK (rekap BI dipertahankan).
+    """
+    __tablename__ = "dispute_items"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    period_id = Column(Integer, ForeignKey("evaluation_periods.id"), nullable=False, index=True)
+    Bank_ID = Column(String(20), ForeignKey("master_banks.Bank_ID"), nullable=False, index=True)
+    Parameter_Code = Column(String(10), nullable=False)         # B1, B2, B3, B6, B7a, B7b, B8
+    Source = Column(String(30), nullable=False)                 # bbg-repo, repo-2m, ...
+    Tanggal = Column(String(10), nullable=True)                 # YYYY-MM-DD; None = nilai agregat (B6)
+    Tenor = Column(String(20), nullable=True)                   # on / 1w / 1m / any / 3b / 12b / 1b
+    Nilai_BI = Column(String(100), nullable=True)
+    Nilai_Bank = Column(String(100), nullable=True)
+    Klaim_Bank_JSON = Column(Text, nullable=True)               # nilai klaim terstruktur (mis. sekunder & perdana B6)
+    Keterangan_Bank = Column(Text, nullable=True)
+    Source_File = Column(String(255), nullable=True)
+    Round_No = Column(Integer, nullable=False, default=1)       # ronde pertama kali muncul
+    Last_Round = Column(Integer, nullable=False, default=1)     # ronde terakhir bank masih menyanggah
+    Status = Column(String(20), nullable=False, default="OPEN")
+    Decided_By = Column(String(100), nullable=True)
+    Decision_Note = Column(Text, nullable=True)
+    Decided_At = Column(DateTime, nullable=True)
+    History_JSON = Column(Text, nullable=True)
 
 
 def get_active_period(db) -> "EvaluationPeriod":

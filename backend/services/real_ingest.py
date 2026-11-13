@@ -139,12 +139,15 @@ def ingest_mm_ois(file_obj, resolver: EntityResolver) -> Dict[str, Any]:
     if total == 0:
         raise IngestError("Tidak ada tanggal sesi matchmaking OIS pada file.")
 
-    raw_metrics, breakdown, failed, crosscheck = {}, {}, {}, []
+    raw_metrics, breakdown, failed, crosscheck, daily = {}, {}, {}, [], {}
     for bank in resolver.banks:
         valid, missing = 0, []
+        flags_1b, flags_3b = [], []
         for d in session_list:
             tenors = quoted.get((bank.Bank_ID, d), set())
             ok1, ok3 = 1 in tenors, 3 in tenors
+            flags_1b.append("Ya" if ok1 else "Tidak")
+            flags_3b.append("Ya" if ok3 else "Tidak")
             if ok1 and ok3:
                 valid += 1
             else:
@@ -165,6 +168,7 @@ def ingest_mm_ois(file_obj, resolver: EntityResolver) -> Dict[str, Any]:
                         "rekap_bi": {"1b": g[0], "3b": g[1]},
                     })
         rate = round(valid / total * 100.0, 2)
+        daily[bank.Bank_ID] = {"sessions": [d.isoformat() for d in session_list], "1b": flags_1b, "3b": flags_3b}
         raw_metrics[bank.Bank_ID] = {"B8": rate}
         breakdown[bank.Bank_ID] = {"B8": {"valid_sessions": valid, "total_sessions": total, "rate": rate}}
         if missing:
@@ -174,6 +178,7 @@ def ingest_mm_ois(file_obj, resolver: EntityResolver) -> Dict[str, Any]:
         "param": "B8",
         "dates": session_list,
         "sessions": [d.isoformat() for d in session_list],
+        "daily": daily,
         "raw_metrics": raw_metrics,
         "breakdown": breakdown,
         "failed": failed,
@@ -227,6 +232,7 @@ def ingest_srbi_ratio(file_obj, resolver: EntityResolver) -> Dict[str, Any]:
         perdana = float(perdana_v) if isinstance(perdana_v, (int, float)) else 0.0
         ratio_rekap = rows[ratio_idx][col] if ratio_idx is not None and len(rows[ratio_idx]) > col else None
         per_bank[bank.Bank_ID] = {
+            "harian": [float(r[col]) if len(r) > col and isinstance(r[col], (int, float)) else 0.0 for r in daily_rows],
             "sekunder": sekunder,
             "perdana": perdana,
             "ratio_rekap_pct": float(ratio_rekap) * 100.0 if isinstance(ratio_rekap, (int, float)) else None,
@@ -272,6 +278,10 @@ def ingest_srbi_ratio(file_obj, resolver: EntityResolver) -> Dict[str, Any]:
         "param": "B6",
         "dates": working_days,
         "working_days": [d.isoformat() for d in working_days],
+        "daily": {
+            b: {"dates": [d.isoformat() for d in working_days], "sekunder": v["harian"], "perdana": v["perdana"]}
+            for b, v in per_bank.items()
+        },
         "raw_metrics": raw_metrics,
         "breakdown": breakdown,
         "failed": failed,
@@ -317,6 +327,7 @@ def _ingest_daily_volume_recap(file_obj, resolver: EntityResolver, param: str, i
 
     total = len(dates)
     target = round(B7_MIN_DAYS_PCT / 100.0 * total)
+    daily: Dict[str, Any] = {}
     columns: Dict[str, int] = {}
     unknown = []
     for col in range(2, len(header)):
@@ -334,7 +345,9 @@ def _ingest_daily_volume_recap(file_obj, resolver: EntityResolver, param: str, i
         col = columns.get(bank.Bank_ID)
         if col is None:
             continue  # bank tidak ada di rekap -> parameter tetap "belum ada data"
-        active = [d for d, r in zip(dates, daily_rows) if len(r) > col and isinstance(r[col], (int, float)) and r[col] > 0]
+        volumes = [float(r[col]) if len(r) > col and isinstance(r[col], (int, float)) else 0.0 for r in daily_rows]
+        daily[bank.Bank_ID] = {"dates": [d.isoformat() for d in dates], "volume": volumes}
+        active = [d for d, v in zip(dates, volumes) if v > 0]
         n = len(active)
         rate = round(min(100.0, n / target * 100.0), 2) if target else 100.0
         raw_metrics[bank.Bank_ID] = {param: rate}
@@ -361,6 +374,7 @@ def _ingest_daily_volume_recap(file_obj, resolver: EntityResolver, param: str, i
         "param": param,
         "dates": dates,
         "working_days": [d.isoformat() for d in dates],
+        "daily": daily,
         "raw_metrics": raw_metrics,
         "breakdown": breakdown,
         "failed": failed,
@@ -390,7 +404,11 @@ QUOTE_SOURCES = {
         "param": "B1", "instrument": "Repo",
         "tenors": [  # urutan = urutan kolom per bank pada sheet Rekap
             {"key": "on", "label": "O/N", "tickers": ["RB00UAP2"], "max_bps": 5.0, "ref": "ON"},
-            {"key": "1w", "label": "1 minggu", "tickers": ["RB00UAP6"], "max_bps": 20.0, "ref": "1W"},
+            # Batas 1 minggu BELUM FINAL: M.01 menyebut maks. 20 bps, sedangkan template kuotasi BI
+            # (COUNTIF <=10 / <11) memakai 10 bps. Sistem memakai 20 bps dan melaporkan sensitivitas 10 bps.
+            {"key": "1w", "label": "1 minggu", "tickers": ["RB00UAP6"], "max_bps": 20.0, "ref": "1W",
+             "alt_max_bps": 10.0,
+             "catatan_batas": "Batas Repo 1 minggu menunggu konfirmasi: M.01 menyebut 20 bps, template kuotasi BI menghitung <= 10 bps."},
             {"key": "1m", "label": "1 bulan", "tickers": ["RB00UAP9"], "max_bps": 20.0, "ref": "1M"},
         ],
     },
@@ -554,15 +572,25 @@ def _ingest_bbg_quotes(file_obj, resolver: EntityResolver, source: str) -> Dict[
         raise IngestError("Tidak ada tanggal kuotasi yang dapat dibaca.")
     total = len(dates)
 
-    raw_metrics, breakdown, failed, crosscheck = {}, {}, {}, []
+    raw_metrics, breakdown, failed, crosscheck, daily = {}, {}, {}, [], {}
     for bank in resolver.banks:
         if bank.Bank_ID not in spreads:
             continue
         best, one = spreads[bank.Bank_ID], one_sided[bank.Bank_ID]
         valid, gugur = 0, []
         per_tenor_valid = {t["key"]: 0 for t in tenors}
+        alt_valid, alt_days = 0, {t["key"]: [] for t in tenors if t.get("alt_max_bps")}
         for d in dates:
             problems = []
+            alt_ok = True
+            for t in tenors:
+                sp = best.get((d, t["key"]))
+                lim = t.get("alt_max_bps", t["max_bps"])
+                if sp is None or sp > lim:
+                    alt_ok = False
+                    if t.get("alt_max_bps") and sp is not None and t["alt_max_bps"] < sp <= t["max_bps"]:
+                        alt_days[t["key"]].append({"tanggal": d.isoformat(), "spread_bps": sp})
+            alt_valid += alt_ok
             for t in tenors:
                 sp = best.get((d, t["key"]))
                 if sp is None:
@@ -595,10 +623,17 @@ def _ingest_bbg_quotes(file_obj, resolver: EntityResolver, source: str) -> Dict[
             else:
                 valid += 1
         rate = round(valid / total * 100.0, 2)
+        daily[bank.Bank_ID] = {"dates": [d.isoformat() for d in dates],
+                               **{t["key"]: [best.get((d, t["key"])) for d in dates] for t in tenors}}
         raw_metrics[bank.Bank_ID] = {param: rate}
         breakdown[bank.Bank_ID] = {param: {
             "valid_days": valid, "total_days": total, "rate": rate,
             "valid_per_tenor": {t["label"]: per_tenor_valid[t["key"]] for t in tenors},
+            **({"sensitivitas_batas": [
+                {"tenor": t["label"], "batas_dipakai_bps": t["max_bps"], "batas_alternatif_bps": t["alt_max_bps"],
+                 "hari_terdampak": alt_days[t["key"]], "rate_jika_alternatif": round(alt_valid / total * 100.0, 2),
+                 "catatan": t["catatan_batas"]}
+                for t in tenors if t.get("alt_max_bps")]} if alt_days else {}),
             "sumber": ("rekap BI (ticker Bloomberg tidak valid)" if bank.Bank_ID in rekap_fallback
                        else "sheet manual bank (_ref)" if bank.Bank_ID in manual_ref else "Bloomberg"),
         }}
@@ -615,6 +650,14 @@ def _ingest_bbg_quotes(file_obj, resolver: EntityResolver, source: str) -> Dict[
         "crosscheck": crosscheck,
         "crosscheck_available": bool(rekap_vals),
         "unknown_banks": [],
+        "daily": daily,
+        "threshold_notes": [
+            {"tenor": t["label"], "batas_dipakai_bps": t["max_bps"], "batas_alternatif_bps": t["alt_max_bps"],
+             "catatan": t["catatan_batas"],
+             "bank_terdampak": sorted(b for b, bd in breakdown.items()
+                                      if any(x["hari_terdampak"] for x in bd[param].get("sensitivitas_batas", [])))}
+            for t in tenors if t.get("alt_max_bps")
+        ],
         "source_notes": [
             {"bank_id": b, "catatan": "Data Bloomberg kosong/ticker tidak valid; dinilai dari Rekap BI (perlu verifikasi sumber)"}
             for b in sorted(rekap_fallback)

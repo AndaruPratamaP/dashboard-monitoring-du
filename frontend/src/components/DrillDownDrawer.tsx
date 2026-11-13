@@ -177,6 +177,27 @@ export const DrillDownDrawer: React.FC = () => {
                   Rincian Komponen Pembentuk Angka
                 </h4>
 
+                {(drillDown.metricDetail.sanggahan_diterima ?? 0) > 0 && (
+                  <div className="p-2.5 rounded-lg bg-emerald-50 border border-emerald-200 text-xs text-emerald-900">
+                    Termasuk {drillDown.metricDetail.sanggahan_diterima} hari/tenor dari sanggahan bank yang diterima petugas
+                    {drillDown.metricDetail.rate_sebelum_sanggahan != null &&
+                      ` (rekap BI sebelum sanggahan: ${drillDown.metricDetail.rate_sebelum_sanggahan}%)`}
+                    .
+                  </div>
+                )}
+                {(drillDown.metricDetail.sensitivitas_batas || []).map((t: any) => (
+                  <div key={t.tenor} className="p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-900">
+                    {t.catatan} Dengan batas {t.batas_alternatif_bps} bps:{" "}
+                    {t.hari_terdampak.length === 0
+                      ? "hasil tidak berubah."
+                      : `${t.hari_terdampak.length} hari tambahan gugur (${t.hari_terdampak.map((h: any) => h.tanggal).join(", ")}), nilai menjadi ${t.rate_jika_alternatif}%.`}
+                  </div>
+                ))}
+                {(drillDown.metricDetail.counterparty_setelah_cutoff?.length ?? 0) > 0 && (
+                  <div className="p-2.5 rounded-lg bg-sky-50 border border-sky-200 text-xs text-sky-900">
+                    Line dibuka setelah cut-off (tetap dihitung): {drillDown.metricDetail.counterparty_setelah_cutoff?.join(", ")}.
+                  </div>
+                )}
                 <div className="grid grid-cols-2 gap-3 text-xs">
                   {drillDown.metricDetail.valid_days !== undefined && (
                     <div className="p-2.5 bg-slate-50 rounded-lg">
@@ -282,7 +303,9 @@ export const DrillDownDrawer: React.FC = () => {
                             : item.realisasi_penjualan_sekunder !== undefined
                             ? `Rp ${item.realisasi_penjualan_sekunder} M`
                             : item.realisasi_line_du !== undefined
-                            ? `DU: ${item.realisasi_line_du}, Non: ${item.realisasi_line_non_du}`
+                            ? item.realisasi_line_non_du !== undefined
+                              ? `DU: ${item.realisasi_line_du}, Non-DU: ${item.realisasi_line_non_du}`
+                              : `${item.realisasi_line_du} line DU`
                             : Array.isArray(item.tenor_tidak_dikuotasi)
                             ? "tidak ada kuotasi"
                             : "-"
@@ -303,7 +326,9 @@ export const DrillDownDrawer: React.FC = () => {
                             : item.target_kewajiban_30pct !== undefined
                             ? `Min Rp ${item.target_kewajiban_30pct} M`
                             : item.target_line_du !== undefined
-                            ? `Min 10 DU & 10 Non-DU`
+                            ? item.target_line_non_du !== undefined
+                              ? `Min ${item.target_line_du} DU & ${item.target_line_non_du} Non-DU`
+                              : `Min ${item.target_line_du} DU`
                             : Array.isArray(item.tenor_tidak_dikuotasi)
                             ? "1 bulan & 3 bulan"
                             : "-"

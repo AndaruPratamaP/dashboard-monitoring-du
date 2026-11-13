@@ -75,35 +75,35 @@ Fokusnya otomasi proses, bukan AI.
 
 | ID | Story | Kriteria terima | P | Size |
 |---|---|---|---|---|
-| E4-1 | Sebagai petugas BI, saya mengimpor/mengoreksi **daftar counterparty line Repo & OIS** tiap bank (counterparty dari master DU/non-DU + status `Sebelum cut-off` / `Setelah cut-off` / `Dihapus`) dari workbook balasan. | Mengikuti template sheet BI; validasi duplikat; bank tidak mengakses portal. | P0 | M |
-| E4-2 | Sistem menghitung B4 (10 DU **dan** 10 non-DU) dan B5 (10 DU) dari isian yang berlaku per akhir periode. | Hanya line `Sebelum cut-off` yang dihitung; daftar periode lalu bisa disalin sebagai titik awal. | P0 | S |
+| ✅ E4-1 | Sebagai petugas BI, saya mengimpor/mengoreksi **daftar counterparty line Repo & OIS** tiap bank (counterparty dari master DU/non-DU + status `Sebelum cut-off` / `Setelah cut-off` / `Dihapus`) dari workbook balasan. | Mengikuti template sheet BI; validasi duplikat; bank tidak mengakses portal. Koreksi status per line lewat tombol **Koreksi** di kartu Konfirmasi Bank (Sprint 4). | P0 | M |
+| ✅ E4-2 | Sistem menghitung B4 (10 DU **dan** 10 non-DU) dan B5 (10 DU) dari isian yang berlaku per akhir periode. | Line `Dihapus` tidak dihitung; `Sebelum` dan `Setelah` cut-off sama-sama dihitung (kondisi akhir periode), line `Setelah` diberi tanda **baru**. Golden test: Panin 6 & Deutsche 7 line OIS DU, sesuai M.01. | P0 | S |
 | E4-3 | Daftar counterparty periode lalu bisa disalin sebagai titik awal periode baru. | Mengurangi isian ulang. | P2 | S |
 
 ### E5 — Generator workbook konfirmasi per bank
 
 | ID | Story | Kriteria terima | P | Size |
 |---|---|---|---|---|
-| E5-1 | Sebagai petugas BI, saya generate workbook konfirmasi **persis template sekarang** (7 sheet + `Index` tersembunyi) untuk 1 atau 21 bank. | Isi sesuai rekap BI; kolom `Status` & `Keterangan` siap diisi bank; struktur identik dengan `Konfirmasi Bank/*.xlsx`. | P0 | M |
-| E5-2 | Unduh semua workbook sekaligus (ZIP) + daftar PIC email per bank. | ZIP berisi 21 file bernama `NN. Nama Bank.xlsx`. | P1 | S |
+| ✅ E5-1 | Sebagai petugas BI, saya generate workbook konfirmasi **persis template sekarang** (7 sheet + `Index` tersembunyi) untuk 1 atau 21 bank. | Isi sesuai rekap BI; kolom `Status` & `Keterangan` siap diisi bank; struktur identik dengan `Konfirmasi Bank/*.xlsx`. | P0 | M |
+| ◐ E5-2 | Unduh semua workbook sekaligus (ZIP) + daftar PIC email per bank. | ZIP berisi 21 file bernama `NN. Nama Bank.xlsx`. **Status:** ZIP selesai; daftar PIC email belum (tidak ada datanya). | P1 | S |
 
 ### E6 — Import & diff balasan bank (pengganti AI)
 
 | ID | Story | Kriteria terima | P | Size |
 |---|---|---|---|---|
-| E6-1 | Sebagai petugas BI, saya upload workbook balasan bank; sistem mengenali sheet walau **nama berubah** (mis. `Kuotasi SRBI, Repo & OIS`). | Fuzzy match nama sheet + fallback mapping manual di UI. | P0 | M |
-| E6-2 | Sistem membandingkan isian bank vs rekap BI **per tanggal per kewajiban** dan otomatis membuat tiket sanggahan untuk setiap selisih. | Tiket berisi tanggal, nilai BI, nilai bank, keterangan bank. | P0 | L |
-| E6-3 | File yang tidak bisa diproses (ber-password, 7z, terlalu besar) ditandai **perlu tindakan manual** dengan alasan yang jelas. | Tidak ada crash; status terlihat di daftar balasan. | P0 | S |
-| E6-4 | Lampiran bukti (PDF/PNG/JPEG) diunggah per tiket dan tampil di previewer split-screen. | Gambar & PDF tampil in-app. | P1 | M |
+| ◐ E6-1 | Sebagai petugas BI, saya upload workbook balasan bank; sistem mengenali sheet walau **nama berubah** (mis. `Kuotasi SRBI, Repo & OIS`). | Fuzzy match nama sheet + fallback mapping manual di UI. **Status:** fuzzy match, sheet `(response)`, dan tabel versi bank di samping tabel BI (`BDI CHECK`) terbaca; pemetaan sheet tampil per file. Pemetaan manual per sheet belum ada; penggantinya **sanggahan manual** per tanggal. | P0 | M |
+| ✅ E6-2 | Sistem membandingkan isian bank vs rekap BI **per tanggal per kewajiban** dan otomatis membuat tiket sanggahan untuk setiap selisih. | Tiket berisi tanggal, nilai BI, nilai bank, keterangan bank. | P0 | L |
+| ✅ E6-3 | File yang tidak bisa diproses (ber-password, 7z, terlalu besar) ditandai **perlu tindakan manual** dengan alasan yang jelas. | Tidak ada crash; status terlihat di daftar balasan. | P0 | S |
+| ✅ E6-4 | Lampiran bukti (PDF/PNG/JPEG) diunggah per tiket dan tampil di previewer split-screen. | Gambar & PDF tampil in-app. | P1 | M |
 
 ### E7 — Rekonsiliasi rule-based
 
 | ID | Story | Kriteria terima | P | Size |
 |---|---|---|---|---|
-| E7-1 | Hapus jalur Gemini; ganti label UI "AI" → **"Pre-check PADG"**. | Tidak ada dependensi API key; teks UI & dokumen konsisten. | P0 | S |
+| ✅ E7-1 | Hapus jalur Gemini; ganti label UI "AI" → **"Pre-check PADG"**. | Tidak ada dependensi API key; teks UI & dokumen konsisten. | P0 | S |
 | ✅ E7-2 | Pre-check deterministik: tolak otomatis bila klaim < threshold, B7a bergantung pada transaksi gugur; selain itu → verifikasi petugas. | Sudah ada; perlu disesuaikan ke sanggahan per tanggal (E3-3). | P0 | S |
-| E7-3 | **Ronde konfirmasi**: setiap kirim–balas tercatat sebagai ronde (1, 2, 3, …) dengan tenggat; tiket menyimpan riwayat argumen tiap ronde. | Audit trail menunjukkan siapa, kapan, ronde berapa. | P0 | M |
-| E7-4 | Tiket otomatis **CLOSED** bila parameter lolos setelah rekalkulasi / ganti tahap. | Tidak ada tiket OPEN basi. | P0 | S |
-| E7-5 | Eskalasi: tiket yang melewati N ronde ditandai **perlu keputusan pimpinan** dan masuk lampiran M.02. | Menjawab pain point "sama-sama ngeyel ga kelar". | P1 | S |
+| ✅ E7-3 | **Ronde konfirmasi**: setiap kirim–balas tercatat sebagai ronde (1, 2, 3, …) dengan tenggat; tiket menyimpan riwayat argumen tiap ronde. | Audit trail menunjukkan siapa, kapan, ronde berapa. | P0 | M |
+| ✅ E7-4 | Tiket otomatis **CLOSED** bila parameter lolos setelah rekalkulasi / ganti tahap. | Tidak ada tiket OPEN basi. | P0 | S |
+| ◐ E7-5 | Eskalasi: tiket yang melewati N ronde ditandai **perlu keputusan pimpinan** dan masuk lampiran M.02. | Menjawab pain point "sama-sama ngeyel ga kelar". **Status:** tanda eskalasi (item masih diperdebatkan ≥ 2 ronde) sudah ada; masuk lampiran M.02 bersama E9-1. | P1 | S |
 | ✅ E7-6 | Keputusan petugas menghitung ulang skor via rule engine; nilai disetujui bertahan saat ETL ulang; snapshot lock memblokir perubahan. | Sudah dikerjakan. | — | — |
 
 ### E8 — Skor akhir tanpa OM
@@ -138,8 +138,8 @@ Asumsi ±1 minggu per sprint, satu orang.
 |---|---|---|---|
 | 1 ✅ | Fondasi + data paling "ril" | E0-1, E0-2, E0-3, E2-1, E2-2, E3-2, E8-1, E8-2 | B6 & B8 dihitung dari data TW III ril; OM hilang |
 | 2 ✅ | Parser terberat | E1-1 s.d. E1-4, E3-1, E3-3 | Matriks B1–B3, B6–B8 dari data ril, lolos golden test |
-| 3 | Siklus konfirmasi | E4-1, E4-2, E5-1 | Counterparty line dari balasan bank; workbook konfirmasi ter-generate |
-| 4 | Rekonsiliasi | E6-1, E6-2, E6-3, E7-1, E7-3, E7-4 | Balasan bank ril diimpor → tiket otomatis → keputusan |
+| 3 ✅ | Siklus konfirmasi | E4-1, E4-2, E5-1 | Counterparty line dari balasan bank; workbook konfirmasi ter-generate |
+| 4 ✅ | Rekonsiliasi | E6-1, E6-2, E6-3, E7-1, E7-3, E7-4 | Balasan bank ril diimpor → tiket otomatis → keputusan |
 | 5 | Finalisasi | E9-1, E10-1, E10-3, sisa P1 | Demo end-to-end + dokumen akhir |
 
 Bila waktu sempit, potong dari bawah: P2 → P1 → E6-1 fuzzy (ganti mapping manual saja).
@@ -184,3 +184,70 @@ Pertanyaan untuk mentor:
 1. Dari mana data kuotasi DBS (OIS & SRBI) dan Deutsche (OIS) diperoleh bila ticker Bloomberg tidak valid?
 2. Deutsche SRBI 3 Agu: seri `YX765088` spread 29 bps, tetapi rekap BI mencatat 20 bps. Apakah ada seri yang dikecualikan (mis. bukan seri tradable)?
 3. Selisih BRI Repo (15 Jul, 15 Sep) hilang di rekap BBG+SPPA. Perlukah data SPPA diunggah sebagai sumber tambahan B1?
+
+## 8. Catatan Sprint 3 (13 Nov 2026)
+
+- **B4/B5 dari workbook konfirmasi.** Workbook kiriman BI (`Konfirmasi Bank/`) menjadi daftar awal, lalu balasan bank (`[Confirmed]*/`) menimpa daftar per bank. 33 workbook diterapkan, 12 di antaranya balasan bank.
+- **Hasil.** 21 bank punya B4 & B5. Repo ≥ 10 DU dan ≥ 10 non-DU di semua bank. OIS di bawah 10 line DU hanya Panin (6) dan Deutsche (7), sama dengan M.01.
+- **Matriks TW III lengkap 9 parameter.** 19 bank Memenuhi; Deutsche (B3) dan HSBC (B2) Tidak Memenuhi.
+- **Workbook konfirmasi** (`GET /api/confirmation/{bank}`, ZIP `GET /api/confirmation-all`).
+  - Berisi 7 sheet ditambah `Index` tersembunyi, dengan dropdown status dan dropdown counterparty.
+  - Golden test: isi Repo 2m, SRBI 3b, Rasio SRBI, MM OIS, dan daftar counterparty **identik** dengan workbook yang dikirim BI ke Deutsche.
+  - Bedanya hanya kuotasi OIS Deutsche, karena sistem memakai Rekap BI yang sudah diperbarui.
+- **Data harian per sumber** kini disimpan (`source_datasets`). Ini juga menjadi jejak file sumber setiap angka (sebagian dari E0-4).
+- **Kinerja.** Membaca 34 workbook turun dari ~95 detik (openpyxl) ke 0,1 detik (pembaca XML langsung). Sebelumnya proxy Next.js terputus.
+
+File yang tidak bisa dibaca otomatis (dilaporkan di UI, tidak diam-diam diabaikan):
+- Balasan BCA dan UOB **terenkripsi password**. Petugas perlu membuka file lalu menyimpannya tanpa password sebelum diunggah.
+
+Pertanyaan untuk mentor:
+4. Apakah counterparty berstatus **"Setelah cut-off"** (dibuka di tengah triwulan) ikut dihitung? Saat ini dihitung, karena aturannya "pada akhir periode".
+5. Template kuotasi BI menghitung Repo 1 minggu dengan `COUNTIF(<=10)`, padahal M.01 menyebut batas 20 bps. Workbook yang di-generate memakai 20 bps. Mana yang benar?
+
+## 9. Catatan Sprint 4 (13 Nov 2026)
+
+**Impor balasan bank → item sanggahan per tanggal** (`POST /api/replies/ingest`, layar *Reconciliation Center*).
+- File di folder balasan dikelompokkan per bank: workbook, bukti (PDF/PNG/JPEG), atau **perlu tindakan manual**. Contoh yang perlu tindakan manual: BCA & UOB ber-password, dan dua arsip `.7z` DBS.
+- Item sanggahan = hari yang menurut bank memenuhi tetapi menurut data harian BI tidak. Sumbernya ada tiga:
+  1. nilai di tabel balasan;
+  2. catatan bank yang menyebut tanggal (mis. Deutsche "kuotasi Repo 21 Juli" di samping screenshot);
+  3. nama file bukti yang menyebut tanggal (mis. Maybank `OIS 21Jul2026.pdf`).
+- Hari yang menurut bank justru lebih buruk dari BI hanya dihitung sebagai selisih informasi, bukan tiket.
+- Hasil TW III ada 23 item. Contohnya BTN SRBI 13 Jul (+JPEG), Mega OIS 14 Jul (+PNG), BOC HK MM OIS 10 Sep, Maybank MM OIS 21 Jul, Deutsche Repo 21 Jul & 8 hari SRBI, serta BRI Repo 15 Jul/15 Sep & SRBI 8 Jul/28 Sep.
+  - Dua item MM OIS (Maybank, BOC HK) adalah hari yang di rekap akhir BI memang sudah diubah menjadi "Ya". Ini konsisten dengan selisih yang dicatat golden test Sprint 1.
+- Deutsche OIS tidak menghasilkan item. Daftar tanggal screenshot mereka sudah tercermin di Rekap BI yang dipakai sistem.
+
+**Keputusan per item** (Terima / Tolak / Batalkan).
+- Nilai parameter dihitung ulang dari data harian BI ditambah item yang diterima.
+- Keputusan tetap berlaku saat file sumber diproses ulang.
+- Drawer menampilkan nilai sebelum sanggahan dan jumlah item yang diterima.
+- Pre-check PADG per item memuat:
+  - rekap BI vs isian bank;
+  - spread klaim vs batas;
+  - ada/tidaknya bukti;
+  - dampak bila diterima (dihitung bersama tenor lain pada tanggal yang sama).
+- Jalur Gemini dihapus (`services/ai_reconciliation.py` → `services/precheck.py`). `GEMINI_API_KEY` tidak dipakai lagi.
+
+**Ronde & eskalasi.**
+- Impor balasan masuk ke ronde berjalan. Ronde 1 dibuat otomatis, dan ronde baru dibuka dengan tenggat.
+- Item yang ditolak lalu diajukan lagi oleh bank di ronde berikutnya dibuka ulang dan ditandai **perlu keputusan pimpinan**.
+- Setiap item menyimpan riwayat (siapa, kapan, ronde, catatan).
+
+**Tiket temuan** ditutup otomatis (`CLOSED`) bila parameter lolos, dan dibuka lagi bila gagal kembali.
+
+**Sanggahan manual** untuk klaim lewat surat/email atau file yang tidak terbaca. Sanggahan ini hanya bisa dicatat untuk hari yang menurut BI memang gugur.
+
+**Counterparty.**
+- Line `Setelah` cut-off tetap dihitung dan diberi tanda **baru**. Di TW III ada di Panin (Repo non-DU), OCBC & DBS (OIS DU), dan BJB (OIS non-DU).
+- Koreksi status per line tersedia di kartu Konfirmasi Bank.
+
+**Batas Repo 1 minggu** belum final. Sistem memakai 20 bps dan melaporkan simulasi 10 bps per bank (hari terdampak & nilai alternatif) di hasil ingest B1 dan di drawer. Di TW III tidak ada bank yang berubah. Bila 10 bps dikonfirmasi, cukup ubah `max_bps` tenor `1w` di `QUOTE_SOURCES`.
+
+Keputusan pemilik produk (13 Nov 2026):
+- Pertanyaan 4 terjawab: line yang dibuka **setelah cut-off tetap dihitung**, tetapi diberi tanda pembeda.
+- Pertanyaan 5 **masih menunggu konfirmasi** (Repo 1 minggu 10 vs 20 bps).
+
+Belum dikerjakan (sisa P1, masuk Sprint 5):
+- Pemetaan sheet manual di UI (E6-1).
+- Item eskalasi masuk lampiran M.02 (E7-5).
+- Riwayat upload ber-hash untuk file sumber (E0-4).
