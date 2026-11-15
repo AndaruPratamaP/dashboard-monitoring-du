@@ -1,9 +1,8 @@
 import io
 import os
-import re
+import hashlib
 import glob
 import json
-import shutil
 import mimetypes
 from urllib.parse import quote
 from datetime import datetime
@@ -14,7 +13,6 @@ from fastapi import FastAPI, Depends, HTTPException, Query, UploadFile, File, Fo
 from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-import pandas as pd
 
 try:
     from dotenv import load_dotenv
@@ -25,21 +23,16 @@ except ImportError:
 from database import engine, Base, get_db, ensure_schema
 from models import (
     get_active_period, MasterBank, EvaluationPeriod, BankScoreMatrix, FindingTicket, AuditTrail,
-    SourceDataset, CounterpartyLine, ConfirmationRound, BankReply, DisputeItem,
+    SourceDataset, CounterpartyLine, ConfirmationRound, BankReply, DisputeItem, UploadHistory,
 )
-from seed import seed_database, get_dataset_folder
+from seed import seed_database
 from services.entity_resolution import EntityResolver
 from services.rule_engine import (
     THRESHOLDS,
     WEIGHTS,
     PARAMETER_NAMES,
     PARAMETER_DETAILS,
-    calculate_puva_raw_metrics,
     evaluate_and_sync_database,
-    compute_matrix_scores,
-    matrix_to_raw,
-    canonical_code,
-    parse_claim_percent,
     PUVA_CODES,
     MAX_PUVA_SCORE,
     STATUS_MEMENUHI,
@@ -47,21 +40,14 @@ from services.rule_engine import (
     STATUS_DATA_BELUM_LENGKAP,
 )
 
-# Periode dataset sample sintetis (dipakai parser lama untuk B1-B5, B7 sampai parser data ril selesai)
-SAMPLE_PERIOD = "2026-Q2"
-from services.worksheet_splitter import generate_bank_worksheet
-from services.precheck import precheck_dispute, precheck_item, ENGINE_NAME as PRECHECK_ENGINE
+from services.precheck import precheck_item
 from services.real_ingest import (
     INGESTERS, SOURCES, QUOTE_SOURCES, IngestError, find_default_file, period_from_dates, default_dataset_dir,
 )
 from services import replies as replies_service
 from services import counterparty as cp_service
 from services.confirmation_workbook import build_confirmation_workbook, confirmation_file_name
-from services.doc_generator import (
-    generate_memo_docx,
-    generate_attachments_xlsx,
-    get_memo_preview_data,
-)
+from services import documents as documents_service
 
 # Direktori penyimpanan unggahan bukti berkas bank
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -76,7 +62,7 @@ async def lifespan(app: FastAPI):
     ensure_schema()
     db = next(get_db())
     try:
-        seed_database(db=db, force_reseed=False)
+        seed_database(db=db)
     finally:
         db.close()
     yield
@@ -158,7 +144,6 @@ def _period_payload(period: EvaluationPeriod) -> Dict[str, Any]:
         "is_active": bool(period.Is_Active),
         "is_snapshot_locked": period.Is_Snapshot_Locked,
         "locked_at": period.Locked_At,
-        "is_sample_data": period.Triwulan == SAMPLE_PERIOD,
         "working_days_count": len(working_days),
         "mm_ois_sessions_count": len(sessions),
         "working_days": working_days,
@@ -235,129 +220,8 @@ def get_all_banks(db: Session = Depends(get_db)):
     ]
 
 
-@app.get("/api/etl/entities")
-def get_entity_resolution_map(db: Session = Depends(get_db)):
-    """Menampilkan tabel referensi Entity Resolution untuk pencocokan multi-sumber."""
-    resolver = EntityResolver(db)
-    return {
-        "total_banks": len(resolver.banks),
-        "entities": resolver.get_resolution_table(),
-    }
-
-
 # ==============================================================================
-# 2. SMART ETL & MULTI-SOURCE PARSER (POST /api/etl/upload)
-# ==============================================================================
-@app.post("/api/etl/upload")
-async def upload_and_process_etl(
-    file_quotes: Optional[UploadFile] = File(None),
-    file_survey: Optional[UploadFile] = File(None),
-    file_hartis: Optional[UploadFile] = File(None),
-    file_antasena: Optional[UploadFile] = File(None),
-    use_sample_datasets: bool = Form(False),
-    stage: str = Form("EARLY"),
-    db: Session = Depends(get_db),
-):
-    """
-    Parser Multi-Sumber Smart ETL:
-    - Menerima upload file Excel mentah (Bloomberg/SPPA, Survey, HARTIS, DS Antasena)
-      atau membaca ulang dari folder sample dataset (untuk Live Demo).
-    - Melakukan Entity Resolution otomatis mencocokkan ticker/kode/nama ke Bank_ID (DU-01 s.d. DU-21).
-    - Menghitung 9 Indikator PUVA (B1 - B8) berdasarkan 60 hari kerja.
-    - Mengupdate matriks skor dan tiket temuan di database.
-    """
-    sample_period = _get_or_create_period(db, 2026, SAMPLE_PERIOD)
-    ensure_period_unlocked(db, sample_period.id)
-    resolver = EntityResolver(db)
-    dataset_dir = get_dataset_folder()
-
-    try:
-        # 1. Baca File Quotes (Bloomberg & SPPA - B1, B2, B3)
-        if file_quotes and file_quotes.filename:
-            content = await file_quotes.read()
-            df_quotes = pd.read_excel(io.BytesIO(content))
-        else:
-            df_quotes = pd.read_excel(os.path.join(dataset_dir, "01_Raw_Kuotasi_Bloomberg_SPPA.xlsx"))
-
-        # 2. Baca File Survey (Counterparty Line - B4, B5)
-        if file_survey and file_survey.filename:
-            content = await file_survey.read()
-            df_survey = pd.read_excel(io.BytesIO(content))
-        else:
-            df_survey = pd.read_excel(os.path.join(dataset_dir, "02_Raw_Survey_Counterparty_Line.xlsx"))
-
-        # 3. Baca File HARTIS (Lelang Perdana & Sekunder - B6, B7a, B7b)
-        if file_hartis and file_hartis.filename:
-            content = await file_hartis.read()
-            hartis_bytes = io.BytesIO(content)
-            df_hartis_p = pd.read_excel(hartis_bytes, sheet_name="Lelang_Perdana_SRBI")
-            hartis_bytes.seek(0)
-            df_hartis_s = pd.read_excel(hartis_bytes, sheet_name="Transaksi_Pasar_Sekunder")
-        else:
-            f03_path = os.path.join(dataset_dir, "03_Raw_HARTIS_Transaksi.xlsx")
-            df_hartis_p = pd.read_excel(f03_path, sheet_name="Lelang_Perdana_SRBI")
-            df_hartis_s = pd.read_excel(f03_path, sheet_name="Transaksi_Pasar_Sekunder")
-
-        # 4. Baca File Antasena (Matchmaking OIS - B8)
-        if file_antasena and file_antasena.filename:
-            content = await file_antasena.read()
-            df_antasena = pd.read_excel(io.BytesIO(content))
-        else:
-            df_antasena = pd.read_excel(os.path.join(dataset_dir, "04_Raw_DS_Antasena_Matchmaking_OIS.xlsx"))
-
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Gagal membaca file Excel input: {str(e)}"
-        )
-
-    # Jalankan Rule Engine kalkulasi mentah
-    raw_metrics, failed_tx, breakdown_stats = calculate_puva_raw_metrics(
-        df_quotes=df_quotes,
-        df_survey=df_survey,
-        df_hartis_p=df_hartis_p,
-        df_hartis_s=df_hartis_s,
-        df_antasena=df_antasena,
-        resolver=resolver,
-        total_working_days=60,
-    )
-
-    # Sinkronisasi ke Database SQLite
-    sync_result = evaluate_and_sync_database(
-        db=db,
-        stage=stage,
-        period_id=sample_period.id,
-        raw_metrics=raw_metrics,
-        failed_transactions=failed_tx,
-        breakdown_stats=breakdown_stats,
-    )
-
-    # Catat ke Audit Trail
-    audit = AuditTrail(
-        action="ETL_PIPELINE_EXECUTED",
-        performed_by="Smart ETL Multi-Source Parser",
-        details=f"Proses ETL sukses. Baris kuotasi: {len(df_quotes)}, baris HARTIS sekunder: {len(df_hartis_s)}. Tahap: {stage.upper()}.",
-    )
-    db.add(audit)
-    db.commit()
-
-    return {
-        "status": "success",
-        "message": "Data mentah multi-sumber berhasil diproses dan disinkronkan ke Database Evaluasi PUVA.",
-        "processed_rows": {
-            "quotes_bloomberg_sppa": len(df_quotes),
-            "survey_counterparty": len(df_survey),
-            "hartis_primary": len(df_hartis_p),
-            "hartis_secondary": len(df_hartis_s),
-            "antasena_matchmaking": len(df_antasena),
-        },
-        "evaluation_summary": sync_result,
-        "sample_disputes_verified": len(failed_tx),
-    }
-
-
-# ==============================================================================
-# 3. DYNAMIC THRESHOLD EVALUATION (POST /api/evaluation/recalculate)
+# 2. INGEST DATA RIL PER SUMBER (POST /api/ingest/{source})
 # ==============================================================================
 @app.post("/api/ingest/{source}")
 async def ingest_real_source(
@@ -413,6 +277,8 @@ async def ingest_real_source(
     for bank_id, payload in result.get("daily", {}).items():
         db.add(SourceDataset(period_id=period.id, Source=source, Bank_ID=bank_id,
                              Payload_JSON=json.dumps(payload), File_Name=file_name))
+    upload = _record_upload(db, period.id, "SUMBER", source, file_name, file_obj, bool(file and file.filename),
+                            f"{result['param']} untuk {len(result.get('daily', {}))} bank")
 
     sync_result = evaluate_and_sync_database(
         db=db,
@@ -449,6 +315,7 @@ async def ingest_real_source(
         "source": source,
         "parameter": param,
         "file_name": file_name,
+        "upload": upload,
         "period": _period_payload(period),
         "per_bank": per_bank,
         "crosscheck": {
@@ -460,6 +327,42 @@ async def ingest_real_source(
         "threshold_notes": result.get("threshold_notes", []),
         "evaluation_summary": sync_result,
     }
+
+
+def _record_upload(db: Session, period_id: Optional[int], kind: str, source: Optional[str], name: str, src: Any,
+                   uploaded: bool, note: Optional[str] = None) -> Dict[str, Any]:
+    """Catat file yang diproses beserta SHA-256; tandai bila isinya sama dengan versi sebelumnya untuk sumber yang sama."""
+    if isinstance(src, (bytes, bytearray)):
+        data = bytes(src)
+    elif hasattr(src, "getvalue"):
+        data = src.getvalue()
+    else:
+        with open(src, "rb") as fh:
+            data = fh.read()
+    digest = hashlib.sha256(data).hexdigest()
+    prev = (db.query(UploadHistory)
+            .filter(UploadHistory.Kind == kind, UploadHistory.Source == source, UploadHistory.File_Name == os.path.basename(name))
+            .order_by(UploadHistory.id.desc()).first())
+    db.add(UploadHistory(period_id=period_id, Kind=kind, Source=source, File_Name=os.path.basename(name), SHA256=digest,
+                         Size_Bytes=len(data), Origin="UNGGAH" if uploaded else "LOKAL", Result_Note=note))
+    return {"file": os.path.basename(name), "sha256": digest, "ukuran": len(data),
+            "versi": "sama dengan sebelumnya" if prev and prev.SHA256 == digest else "berubah" if prev else "baru"}
+
+
+@app.get("/api/uploads")
+def list_uploads(kind: Optional[str] = None, limit: int = 200, db: Session = Depends(get_db)):
+    """Riwayat file yang diproses (terbaru dulu) untuk periode aktif."""
+    period = get_active_period(db)
+    q = db.query(UploadHistory)
+    if period is not None:
+        q = q.filter((UploadHistory.period_id == period.id) | (UploadHistory.period_id.is_(None)))
+    if kind:
+        q = q.filter(UploadHistory.Kind == kind.upper())
+    return [{
+        "id": u.id, "kind": u.Kind, "source": u.Source, "file": u.File_Name, "sha256": u.SHA256,
+        "ukuran": u.Size_Bytes, "asal": u.Origin, "oleh": u.Uploaded_By,
+        "waktu": u.Uploaded_At.isoformat(timespec="seconds") if u.Uploaded_At else None, "catatan": u.Result_Note,
+    } for u in q.order_by(UploadHistory.id.desc()).limit(limit)]
 
 
 def _sync_counterparty(db: Session, period: EvaluationPeriod) -> Dict[str, Any]:
@@ -500,8 +403,8 @@ async def ingest_counterparty(
     period = get_active_period(db)
     if period is None:
         raise HTTPException(status_code=400, detail="Belum ada periode evaluasi.")
-    if period.Triwulan == SAMPLE_PERIOD:
-        raise HTTPException(status_code=400, detail="Periode aktif adalah data sample. Unggah data transaksi/kuotasi ril lebih dulu.")
+    if not period.Working_Days_JSON:
+        raise HTTPException(status_code=400, detail="Periode aktif belum memuat data ril. Unggah data transaksi/kuotasi lebih dulu.")
     ensure_period_unlocked(db, period.id)
 
     if files:
@@ -513,6 +416,7 @@ async def ingest_counterparty(
         sources = [(p, p) for p in paths]
 
     applied = cp_service.apply_workbooks(db, period.id, sources, EntityResolver(db))
+    uploads = [_record_upload(db, period.id, "COUNTERPARTY", None, name, src, bool(files)) for name, src in sources]
     result = _sync_counterparty(db, period)
     db.add(AuditTrail(
         action="INGEST_COUNTERPARTY",
@@ -526,6 +430,7 @@ async def ingest_counterparty(
         "period": _period_payload(period),
         "applied": applied["applied"],
         "skipped": applied["skipped"],
+        "uploads": uploads,
         "per_bank": _counterparty_summary(db, result["metrics"]),
         "evaluation_summary": result["sync"],
     }
@@ -601,9 +506,8 @@ def download_all_confirmation_workbooks(db: Session = Depends(get_db)):
 
 
 # ==============================================================================
-# 3c. BALASAN BANK, RONDE KONFIRMASI & ITEM SANGGAHAN (Sprint 4)
+# 3. BALASAN BANK, RONDE KONFIRMASI & ITEM SANGGAHAN (Sprint 4)
 # ==============================================================================
-ESCALATE_AFTER_ROUNDS = 2  # item yang masih diperdebatkan sejak >= 2 ronde -> perlu keputusan pimpinan
 
 
 def _current_round(db: Session, period: EvaluationPeriod, create: bool = True) -> Optional[ConfirmationRound]:
@@ -746,7 +650,6 @@ async def ingest_bank_replies(
     rnd = _current_round(db, period)
     resolver = EntityResolver(db)
     forced = db.get(MasterBank, bank_id) if bank_id else None
-    year = json.loads(period.Working_Days_JSON)[0][:4]
 
     # (nama file, sumber bytes/path, path tersimpan)
     entries: List[Tuple[str, Any, Optional[str]]] = []
@@ -784,6 +687,18 @@ async def ingest_bank_replies(
             continue
         by_bank.setdefault(bank.Bank_ID, {"WORKBOOK": [], "BUKTI": [], "MANUAL": []})[kind].append((name, stored))
 
+    for b_id, groups in by_bank.items():
+        for k in groups:
+            for n, stored in groups[k]:
+                _record_upload(db, period.id, "BALASAN", b_id, n, stored, bool(files), f"ronde {rnd.Round_No}, {k.lower()}")
+
+    # Pemetaan sheet manual dari impor sebelumnya tetap dipakai untuk file yang sama
+    saved_maps: Dict[Tuple[str, str], Dict[str, str]] = {}
+    for r in db.query(BankReply).filter(BankReply.period_id == period.id, BankReply.Kind == "WORKBOOK"):
+        m = json.loads(r.Summary_JSON or "{}").get("pemetaan_manual")
+        if m:
+            saved_maps[(r.Bank_ID, r.File_Name)] = m
+
     summary = []
     for b_id, groups in sorted(by_bank.items()):
         evidence = [n for n, _ in groups["BUKTI"]]
@@ -808,17 +723,13 @@ async def ingest_bank_replies(
                 db.add(BankReply(period_id=period.id, Round_No=rnd.Round_No, Bank_ID=b_id, File_Name=n,
                                  Stored_Path=stored, Kind="MANUAL", Status_Note=str(e)))
                 continue
-            parsed = replies_service.parse_reply(sheets)
-            diff = replies_service.diff_reply(db, period.id, b_id, parsed, evidence, int(year))
-            counts = _upsert_items(db, period, b_id, diff["items"], n, rnd.Round_No)
-            for k, v in counts.items():
-                bank_sum["item"][k] += v
-            wb_sum = {"file": n, "sheet": parsed["mapping"], "item": len(diff["items"]),
-                      "selisih_info": diff["info"], "catatan_bank": sorted({x for v in diff["notes"].values() for x in v})}
+            overrides = saved_maps.get((b_id, n), {})
+            wb_sum, counts, note = _process_reply_workbook(db, period, rnd.Round_No, b_id, n, sheets, evidence, overrides)
+            for k in ("baru", "diperbarui", "dibuka_ulang"):
+                bank_sum["item"][k] += counts[k]
             bank_sum["workbook"].append(wb_sum)
             db.add(BankReply(period_id=period.id, Round_No=rnd.Round_No, Bank_ID=b_id, File_Name=n,
-                             Stored_Path=stored, Kind="WORKBOOK", Summary_JSON=json.dumps(wb_sum),
-                             Status_Note=None if parsed["data"] else "tidak memuat sheet kewajiban harian (mis. hanya counterparty)"))
+                             Stored_Path=stored, Kind="WORKBOOK", Summary_JSON=json.dumps(wb_sum), Status_Note=note))
         summary.append(bank_sum)
 
     total_new = sum(s["item"]["baru"] for s in summary)
@@ -830,6 +741,72 @@ async def ingest_bank_replies(
     ))
     db.commit()
     return {"status": "success", "round": _round_payload(rnd), "per_bank": summary, "unassigned": unassigned}
+
+
+def _process_reply_workbook(db: Session, period: EvaluationPeriod, round_no: int, bank_id: str, file_name: str,
+                            sheets: Dict[str, Any], evidence: List[str], overrides: Dict[str, str]):
+    """Baca satu workbook balasan (dengan pemetaan sheet manual bila ada) dan simpan item sanggahannya."""
+    year = int(json.loads(period.Working_Days_JSON)[0][:4])
+    parsed = replies_service.parse_reply(sheets, overrides)
+    diff = replies_service.diff_reply(db, period.id, bank_id, parsed, evidence, year)
+    counts = _upsert_items(db, period, bank_id, diff["items"], file_name, round_no)
+    wb_sum = {"file": file_name, "sheet": parsed["mapping"], "item": len(diff["items"]),
+              "selisih_info": diff["info"], "catatan_bank": sorted({x for v in diff["notes"].values() for x in v}),
+              **({"pemetaan_manual": overrides} if overrides else {})}
+    note = None if parsed["data"] else "tidak memuat sheet kewajiban harian (mis. hanya counterparty)"
+    return wb_sum, {**counts, "_keys": {(i["source"], i["tanggal"], i["tenor"]) for i in diff["items"]}}, note
+
+
+@app.get("/api/replies/sheet-kinds")
+def list_sheet_kinds():
+    """Pilihan jenis sheet untuk pemetaan manual."""
+    return [{"key": k, "label": v} for k, v in replies_service.SHEET_KINDS.items()]
+
+
+@app.post("/api/replies/{reply_id}/mapping")
+def remap_reply_workbook(reply_id: int, mapping: str = Form(..., description='JSON {"nama sheet": "jenis" | "abaikan"}'),
+                         db: Session = Depends(get_db)):
+    """
+    Pemetaan sheet manual oleh petugas untuk workbook yang nama sheetnya tidak dikenali (E6-1).
+    Workbook diproses ulang; item OPEN dari file ini yang tidak lagi terbentuk dihapus.
+    """
+    reply = db.get(BankReply, reply_id)
+    if reply is None or reply.Kind != "WORKBOOK":
+        raise HTTPException(status_code=404, detail="Workbook balasan tidak ditemukan.")
+    period = db.get(EvaluationPeriod, reply.period_id)
+    ensure_period_unlocked(db, period.id)
+    try:
+        overrides = {k: v for k, v in json.loads(mapping).items() if v}
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Format pemetaan tidak valid.")
+    bad = [v for v in overrides.values() if v not in replies_service.SHEET_KINDS]
+    if bad:
+        raise HTTPException(status_code=400, detail=f"Jenis sheet tidak dikenal: {bad}")
+    try:
+        sheets = replies_service.read_workbook(reply.Stored_Path)
+    except (ValueError, OSError) as e:
+        raise HTTPException(status_code=400, detail=f"Workbook tidak dapat dibuka: {e}")
+    unknown = [k for k in overrides if k not in sheets]
+    if unknown:
+        raise HTTPException(status_code=400, detail=f"Sheet tidak ada di workbook: {unknown}")
+
+    evidence = [r.File_Name for r in db.query(BankReply).filter(
+        BankReply.period_id == period.id, BankReply.Bank_ID == reply.Bank_ID, BankReply.Kind == "BUKTI")]
+    wb_sum, counts, note = _process_reply_workbook(db, period, reply.Round_No, reply.Bank_ID, reply.File_Name,
+                                                   sheets, evidence, overrides)
+    keys = counts.pop("_keys")
+    stale = [it for it in db.query(DisputeItem).filter(
+        DisputeItem.period_id == period.id, DisputeItem.Bank_ID == reply.Bank_ID,
+        DisputeItem.Source_File == reply.File_Name, DisputeItem.Status == "OPEN")
+        if (it.Source, it.Tanggal, it.Tenor) not in keys and len(json.loads(it.History_JSON or "[]")) <= 1]
+    for it in stale:
+        db.delete(it)
+    reply.Summary_JSON, reply.Status_Note = json.dumps(wb_sum), note
+    db.add(AuditTrail(action="REMAP_REPLY_SHEETS", performed_by="Petugas BI DPPK",
+                      details=f"Pemetaan sheet manual {reply.Bank_ID} '{reply.File_Name}': {overrides}; "
+                              f"{counts['baru']} item baru, {len(stale)} item dihapus."))
+    db.commit()
+    return {"status": "success", "summary": wb_sum, "item": {**counts, "dihapus": len(stale)}}
 
 
 @app.get("/api/replies")
@@ -915,7 +892,6 @@ def list_dispute_items(bank_id: Optional[str] = Query(None), db: Session = Depen
             {"param": it.Parameter_Code, "rate_now": g["rate_sekarang"], "rate_if_accepted": rate_one,
              "threshold": g["threshold"], "same_day": len(same_day)},
         )
-        rounds = it.Last_Round - it.Round_No + 1
         g["items"].append({
             "id": it.id, "tanggal": it.Tanggal, "tenor": it.Tenor,
             "tenor_label": replies_service.TENOR_LABEL.get(it.Tenor or "", it.Tenor),
@@ -924,7 +900,7 @@ def list_dispute_items(bank_id: Optional[str] = Query(None), db: Session = Depen
             "status": it.Status, "decided_by": it.Decided_By, "decision_note": it.Decision_Note,
             "decided_at": it.Decided_At.isoformat() if it.Decided_At else None,
             "history": json.loads(it.History_JSON or "[]"), "precheck": pre,
-            "perlu_keputusan_pimpinan": it.Status == "OPEN" and rounds >= ESCALATE_AFTER_ROUNDS,
+            "perlu_keputusan_pimpinan": replies_service.needs_escalation(it),
         })
     out = []
     for g in groups.values():
@@ -1119,276 +1095,6 @@ def get_finding_tickets(
     return results
 
 
-# ==============================================================================
-# 5. TAHAP 4: BANK SANGGAHAN SUBMISSION & AI RECONCILIATION CENTER
-# ==============================================================================
-
-@app.post("/api/disputes/submit")
-async def submit_bank_dispute(
-    finding_id: str = Form(...),
-    nilai_klaim_bank: str = Form(...),
-    alasan_sanggahan: str = Form(...),
-    file_bukti: Optional[UploadFile] = File(None),
-    db: Session = Depends(get_db),
-):
-    """
-    Mode Portal DU: Bank mengajukan klarifikasi / sanggahan atas suatu Finding_ID
-    lengkap dengan angka klaim, narasi alasan, dan berkas bukti (.pdf/.xlsx/.png).
-    """
-    ticket = db.query(FindingTicket).filter(FindingTicket.Finding_ID == finding_id).first()
-    if not ticket:
-        raise HTTPException(status_code=404, detail=f"Tiket Temuan '{finding_id}' tidak ditemukan.")
-    ensure_period_unlocked(db, ticket.period_id)
-
-    # Simpan berkas bukti jika ada
-    saved_filename = ticket.File_Bukti_Name
-    if file_bukti and file_bukti.filename:
-        clean_fn = f"{finding_id}_{os.path.basename(file_bukti.filename)}"
-        target_path = os.path.join(UPLOADS_DIR, clean_fn)
-        with open(target_path, "wb") as f_out:
-            shutil.copyfileobj(file_bukti.file, f_out)
-        saved_filename = clean_fn
-
-    # Update tiket sanggahan
-    ticket.Nilai_Klaim_Bank = nilai_klaim_bank
-    ticket.Alasan_Sanggahan = alasan_sanggahan
-    ticket.File_Bukti_Name = saved_filename
-    ticket.BI_Decision_Status = "PENDING_REVIEW"
-    ticket.Updated_At = datetime.utcnow()
-
-    # Catat ke Audit Trail
-    audit = AuditTrail(
-        action="DISPUTE_SUBMITTED",
-        performed_by=f"Bank DU ({ticket.Bank_ID})",
-        details=f"Pengajuan sanggahan untuk {finding_id} ({ticket.Parameter_Code}): Klaim '{nilai_klaim_bank}', Berkas: '{saved_filename or 'Tidak ada'}'.",
-    )
-    db.add(audit)
-    db.commit()
-
-    return {
-        "status": "success",
-        "message": f"Sanggahan untuk tiket {finding_id} berhasil diajukan dan berstatus PENDING_REVIEW.",
-        "data": {
-            "finding_id": ticket.Finding_ID,
-            "bank_id": ticket.Bank_ID,
-            "parameter_code": ticket.Parameter_Code,
-            "nilai_klaim_bank": ticket.Nilai_Klaim_Bank,
-            "alasan_sanggahan": ticket.Alasan_Sanggahan,
-            "file_bukti_name": ticket.File_Bukti_Name,
-            "bi_decision_status": ticket.BI_Decision_Status,
-            "updated_at": ticket.Updated_At.isoformat(),
-        },
-    }
-
-
-@app.post("/api/reconciliation/{finding_id}/analyze")
-def precheck_finding(finding_id: str, db: Session = Depends(get_db)):
-    """
-    Pre-check PADG (deterministik) atas sanggahan tiket temuan: angka klaim vs threshold,
-    aturan tenor mutlak, kelengkapan bukti. Tidak memakai layanan AI eksternal dan tidak
-    pernah menyetujui sendiri; keputusan tetap di tangan petugas BI.
-    """
-    ticket = db.query(FindingTicket).join(MasterBank).filter(FindingTicket.Finding_ID == finding_id).first()
-    if not ticket:
-        raise HTTPException(status_code=404, detail=f"Tiket Temuan '{finding_id}' tidak ditemukan.")
-
-    period = ensure_period_unlocked(db, ticket.period_id)
-    stage = period.Active_Threshold_Stage if period else "EARLY"
-    failed_details = json.loads(ticket.Detail_Transaksi_Gugur) if ticket.Detail_Transaksi_Gugur else []
-
-    result = precheck_dispute(
-        finding_id=ticket.Finding_ID,
-        bank_alias=ticket.bank.Masked_Alias,
-        parameter_code=ticket.Parameter_Code,
-        rekap_bi=ticket.Nilai_Rekap_BI,
-        klaim_bank=ticket.Nilai_Klaim_Bank,
-        alasan_sanggahan=ticket.Alasan_Sanggahan,
-        file_bukti_name=ticket.File_Bukti_Name,
-        failed_details=failed_details,
-        stage=stage,
-    )
-    result["engine_used"] = PRECHECK_ENGINE
-
-    ticket.AI_Recommendation_Status = result["recommendation_status"]
-    ticket.AI_Analysis_Text = result["analysis_text"]
-    ticket.Updated_At = datetime.utcnow()
-    db.add(AuditTrail(
-        action="PRECHECK_PADG",
-        performed_by=PRECHECK_ENGINE,
-        details=f"Pre-check sanggahan {finding_id}: {result['recommendation_status']}.",
-    ))
-    db.commit()
-
-    return {
-        "status": "success",
-        "finding_id": ticket.Finding_ID,
-        "bank_alias": ticket.bank.Masked_Alias,
-        "ai_result": result,
-        "updated_at": ticket.Updated_At.isoformat(),
-    }
-
-
-@app.post("/api/reconciliation/{finding_id}/decide")
-def decide_finding_dispute(
-    finding_id: str,
-    decision: str = Form(..., description="'APPROVED' atau 'REJECTED'"),
-    verified_by: Optional[str] = Form("Petugas BI DPPK"),
-    notes: Optional[str] = Form(None),
-    approved_value: Optional[float] = Form(None, description="Nilai realisasi (%) yang ditetapkan petugas. Default: angka klaim bank."),
-    db: Session = Depends(get_db),
-):
-    """
-    Kontrol Human-in-the-Loop Petugas BI:
-    Mengeksekusi keputusan final ('APPROVED' atau 'REJECTED'):
-    - Jika APPROVED: nilai realisasi parameter diganti dengan nilai yang disetujui
-      (approved_value, atau angka klaim bank), lalu skor dihitung ulang terhadap threshold
-      aktif. Parameter hanya menjadi lolos bila nilai tersebut memang memenuhi threshold.
-    - Jika REJECTED: Mempertahankan temuan dan mencatat penolakan di Audit Trail.
-    """
-    dec_upper = decision.upper().strip()
-    if dec_upper not in ["APPROVED", "REJECTED"]:
-        raise HTTPException(status_code=400, detail="Keputusan harus berupa 'APPROVED' atau 'REJECTED'.")
-
-    ticket = db.query(FindingTicket).join(MasterBank).filter(FindingTicket.Finding_ID == finding_id).first()
-    if not ticket:
-        raise HTTPException(status_code=404, detail=f"Tiket Temuan '{finding_id}' tidak ditemukan.")
-
-    period = ensure_period_unlocked(db, ticket.period_id)
-    if not period:
-        raise HTTPException(status_code=404, detail="Periode evaluasi belum diinisialisasi.")
-    stage = period.Active_Threshold_Stage or "EARLY"
-
-    # Matriks skor bank pada periode yang sama dengan tiket
-    matrix_entry = db.query(BankScoreMatrix).filter(
-        BankScoreMatrix.Bank_ID == ticket.Bank_ID,
-        BankScoreMatrix.period_id == period.id,
-    ).first()
-    if not matrix_entry:
-        raise HTTPException(status_code=404, detail=f"Matriks skor {ticket.Bank_ID} untuk periode {period.Triwulan} tidak ditemukan.")
-
-    param_code = canonical_code(ticket.Parameter_Code)
-    threshold_val = THRESHOLDS.get(stage, THRESHOLDS["EARLY"]).get(param_code, 80.0)
-    officer = verified_by or "Petugas BI DPPK"
-
-    if dec_upper == "APPROVED":
-        # 1. Tentukan nilai yang disetujui: input petugas > angka klaim bank
-        final_val = approved_value
-        if final_val is None:
-            final_val = parse_claim_percent(ticket.Nilai_Klaim_Bank)
-        if final_val is None:
-            raise HTTPException(
-                status_code=400,
-                detail="Klaim bank tidak memuat angka persentase. Isi 'approved_value' (nilai realisasi yang disetujui) untuk menyetujui sanggahan.",
-            )
-        if not 0.0 <= final_val <= 100.0:
-            raise HTTPException(status_code=400, detail="Nilai yang disetujui harus berada di rentang 0 - 100%.")
-
-        # 2. Terapkan nilai lalu hitung ulang seluruh skor dengan Rule Engine
-        raw = matrix_to_raw(matrix_entry)
-        raw[param_code] = max(raw.get(param_code, 0.0), final_val)
-        scores = compute_matrix_scores(raw, stage=stage)
-        for k, v in scores.items():
-            if hasattr(matrix_entry, k):
-                setattr(matrix_entry, k, v)
-        matrix_entry.updated_at = datetime.utcnow()
-
-        ticket.Approved_Value = final_val
-        now_passed = scores.get(f"{param_code.lower()}_passed", False)
-        audit_detail = (
-            f"Petugas {officer} MENYETUJUI sanggahan {ticket.Finding_ID} ({ticket.bank.Masked_Alias}). "
-            f"Parameter {param_code} disesuaikan menjadi {raw[param_code]:.2f}% "
-            f"({'LOLOS' if now_passed else 'tetap DI BAWAH'} threshold {stage} {threshold_val:.1f}%). "
-            f"Skor PUVA baru: {matrix_entry.total_puva_score}% (Status: {matrix_entry.compliance_status})."
-        )
-    else:
-        ticket.Approved_Value = None
-        audit_detail = (
-            f"Petugas {officer} MENOLAK sanggahan {ticket.Finding_ID} ({ticket.bank.Masked_Alias}). "
-            f"Status temuan dipertahankan. Catatan: '{notes or 'Tidak memenuhi ketentuan PADG No. 23/2024'}'."
-        )
-
-    ticket.BI_Decision_Status = dec_upper
-    ticket.Verified_By = officer
-    ticket.Updated_At = datetime.utcnow()
-
-    # Catat di Audit Trail
-    audit = AuditTrail(
-        action=f"DISPUTE_DECISION_{dec_upper}",
-        performed_by=ticket.Verified_By,
-        details=audit_detail,
-    )
-    db.add(audit)
-    db.commit()
-
-    return {
-        "status": "success",
-        "message": f"Keputusan '{dec_upper}' untuk tiket {finding_id} berhasil diterapkan.",
-        "data": {
-            "finding_id": ticket.Finding_ID,
-            "decision": ticket.BI_Decision_Status,
-            "verified_by": ticket.Verified_By,
-            "updated_bank_matrix": {
-                "bank_id": matrix_entry.Bank_ID,
-                "alias": ticket.bank.Masked_Alias,
-                "total_puva_score": matrix_entry.total_puva_score,
-                "compliance_status": matrix_entry.compliance_status,
-            },
-        },
-    }
-
-
-# ==============================================================================
-# 6. EWS AUTOMATED NOTIFICATION & AUDIT TRAIL ENDPOINTS
-# ==============================================================================
-
-@app.post("/api/notifications/ews/send-reminder")
-def send_ews_reminder(bank_id: str = Form(...), db: Session = Depends(get_db)):
-    """
-    Simulasi pengiriman email pengingat Early Warning System (EWS) otomatis
-    kepada tim kepatuhan Dealer Utama terkait parameter yang di bawah ambang batas.
-    """
-    bank = db.query(MasterBank).filter(MasterBank.Bank_ID == bank_id).first()
-    if not bank:
-        raise HTTPException(status_code=404, detail=f"Bank '{bank_id}' tidak ditemukan.")
-
-    period = get_active_period(db)
-    matrix_entry = db.query(BankScoreMatrix).filter(
-        BankScoreMatrix.Bank_ID == bank.Bank_ID,
-        BankScoreMatrix.period_id == (period.id if period else None),
-    ).first()
-
-    # Kumpulkan parameter yang gugur (None = data belum ada, bukan gugur)
-    failed_params = []
-    if matrix_entry:
-        for p in PUVA_CODES:
-            if getattr(matrix_entry, f"{p.lower()}_passed", None) is False:
-                failed_params.append(p)
-
-    recipient = f"compliance.puva@{bank.Kode_SPPA_Antasena.lower()}.co.id"
-    subject = f"[PERINGATAN DINI - EWS BI] Pemenuhan Kewajiban Dealer Utama PUVA {bank.Masked_Alias}"
-
-    audit = AuditTrail(
-        action="EWS_REMINDER_EMAIL_SENT",
-        performed_by="System Early Warning Notifier",
-        details=f"Email EWS otomatis terkirim ke {recipient}. Parameter perhatian: {', '.join(failed_params) if failed_params else 'Nihil'}.",
-    )
-    db.add(audit)
-    db.commit()
-
-    return {
-        "status": "success",
-        "message": f"Email pengingat EWS resmi berhasil dikirimkan ke Tim Kepatuhan {bank.Masked_Alias}.",
-        "delivery_receipt": {
-            "recipient": recipient,
-            "bank_id": bank.Bank_ID,
-            "bank_alias": bank.Masked_Alias,
-            "subject": subject,
-            "failed_parameters": failed_params,
-            "sent_at": datetime.utcnow().isoformat(),
-        },
-    }
-
-
 @app.get("/api/audit-trail")
 def get_audit_trail_logs(limit: int = Query(20), db: Session = Depends(get_db)):
     """Mengembalikan riwayat audit trail aktivitas verifikasi dan sistem evaluasi."""
@@ -1406,54 +1112,7 @@ def get_audit_trail_logs(limit: int = Query(20), db: Session = Depends(get_db)):
 
 
 # ==============================================================================
-# 7. AUTO-SPLITTER WORKSHEET PER BANK (GET /api/export/worksheet/{bank_id})
-# ==============================================================================
-@app.get("/api/export/worksheet/{bank_id}")
-def export_single_bank_worksheet(bank_id: str, db: Session = Depends(get_db)):
-    """
-    Auto-Splitter Worksheet Per Bank:
-    Menghasilkan file Excel resmi (.xlsx) khusus 1 bank DU yang berisi:
-    1. Sheet 'Ringkasan_Evaluasi': Skor B1-B8 PUVA & OM serta rekomendasi kelulusan.
-    2. Sheet 'Daftar_Temuan': Tiket Finding_ID sanggahan.
-    3. Sheet 'Transaksi_Gugur': Rincian baris transaksi mentah yang didiskualifikasi oleh aturan PADG.
-    """
-    bank = db.query(MasterBank).filter(MasterBank.Bank_ID == bank_id).first()
-    if not bank:
-        bank = db.query(MasterBank).filter(MasterBank.Masked_Alias == bank_id).first()
-    if not bank:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Bank Dealer Utama dengan ID atau Alias '{bank_id}' tidak ditemukan."
-        )
-
-    period = get_active_period(db)
-    triwulan_str = period.Triwulan if period else "2026-Q2"
-
-    try:
-        excel_stream = generate_bank_worksheet(db, bank.Bank_ID)
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Terjadi kesalahan saat menghasilkan worksheet: {str(e)}"
-        )
-
-    clean_alias = bank.Masked_Alias.replace(" ", "_")
-    filename = f"Worksheet_Evaluasi_PUVA_{clean_alias}_{bank.Bank_ID}_{triwulan_str}.xlsx"
-
-    headers = {
-        "Content-Disposition": f"attachment; filename=\"{filename}\"",
-        "Access-Control-Expose-Headers": "Content-Disposition",
-    }
-
-    return StreamingResponse(
-        excel_stream,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers=headers,
-    )
-
-
-# ==============================================================================
-# 8. SNAPSHOT LOCKING & RE-OPENING
+# 5. SNAPSHOT LOCKING & RE-OPENING
 # ==============================================================================
 class SnapshotLockRequest(BaseModel):
     locked_by: Optional[str] = "Tim Evaluasi DPPK"
@@ -1588,124 +1247,41 @@ def unlock_evaluation_snapshot(db: Session = Depends(get_db)):
 
 
 # ==============================================================================
-# 9. AUTOMATED DOCUMENT GENERATOR (WORD M.02 / M.01 & EXCEL 3-LAMPIRAN)
+# 6. DOKUMEN AKHIR (format dokumen ril DPPK): M.02, M.01, lampiran, surat, matriks Excel
 # ==============================================================================
-class MemoGenerateRequest(BaseModel):
-    custom_narration: Optional[str] = None
-    masked: Optional[bool] = False
-
-
-@app.get("/api/export/preview/{memo_type}")
-def get_memo_preview(
-    memo_type: str,
-    masked: bool = Query(False),
-    db: Session = Depends(get_db),
-):
-    """
-    Mengembalikan data struktural memorandum (M.02 atau M.01) untuk live preview di web UI.
-    """
-    preview = get_memo_preview_data(db, memo_type=memo_type, masked=masked)
-    return preview
-
-
-@app.get("/api/export/memo/{memo_type}")
-def export_memo_word_get(
-    memo_type: str,
-    masked: bool = Query(False),
-    narration: Optional[str] = Query(None),
-    db: Session = Depends(get_db),
-):
-    """
-    Menghasilkan file Microsoft Word (.docx) resmi:
-    - M.02: Memorandum Evaluasi ke Pimpinan DPPK
-    - M.01: Memorandum Pengantar Hasil Evaluasi ke DSMM
-    """
-    memo_type_clean = memo_type.lower()
-    if memo_type_clean not in ["m02", "m01"]:
-        raise HTTPException(status_code=400, detail="memo_type harus berupa 'm02' atau 'm01'.")
-
+def _document_period(db: Session) -> EvaluationPeriod:
     period = get_active_period(db)
-    triwulan_str = period.Triwulan if period else "2026-Q2"
+    if period is None or not period.Working_Days_JSON:
+        raise HTTPException(status_code=400, detail="Periode aktif belum memuat data ril. Proses file sumber terlebih dahulu.")
+    return period
 
-    try:
-        docx_stream = generate_memo_docx(
-            db=db,
-            memo_type=memo_type_clean,
-            custom_narration=narration,
-            masked=masked,
-        )
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Terjadi kesalahan saat membuat memorandum Word: {str(e)}",
-        )
 
-    code_label = "M02_DPPK" if memo_type_clean == "m02" else "M01_DSMM"
-    filename = f"Memorandum_{code_label}_Evaluasi_PUVA_{triwulan_str}.docx"
+@app.get("/api/documents/preview")
+def documents_preview(db: Session = Depends(get_db)):
+    """Isi dokumen akhir (matriks, keterangan, kalimat memo, eskalasi) untuk pratinjau di UI."""
+    period = _document_period(db)
+    ev = documents_service.build_evaluation(db, period)
+    return {**ev, "memo": documents_service.memo_points(ev),
+            "files": {k: documents_service.file_name(k, ev) for k in [*documents_service.DOC_KINDS, "paket"]}}
 
-    headers = {
-        "Content-Disposition": f"attachment; filename=\"{filename}\"",
+
+@app.get("/api/documents/{kind}")
+def documents_download(kind: str, db: Session = Depends(get_db)):
+    """Unduh satu dokumen (m02, m02-lampiran, m01, m01-lampiran, surat, matriks) atau paket zip semuanya."""
+    if kind not in documents_service.DOC_KINDS and kind != "paket":
+        raise HTTPException(status_code=404, detail=f"Jenis dokumen tidak dikenal: {kind}")
+    period = _document_period(db)
+    ev = documents_service.build_evaluation(db, period)
+    stream, name, media = documents_service.generate(kind, ev, db, period)
+    db.add(AuditTrail(
+        action="GENERATE_DOCUMENT", performed_by="Tim Evaluasi DPPK",
+        details=f"{name} ({'snapshot terkunci' if period.Is_Snapshot_Locked else 'DRAFT, snapshot belum dikunci'})",
+    ))
+    db.commit()
+    return StreamingResponse(stream, media_type=media, headers={
+        "Content-Disposition": f"attachment; filename*=UTF-8''{quote(name)}",
         "Access-Control-Expose-Headers": "Content-Disposition",
-    }
-
-    return StreamingResponse(
-        docx_stream,
-        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        headers=headers,
-    )
-
-
-@app.post("/api/export/memo/{memo_type}/generate")
-def export_memo_word_post(
-    memo_type: str,
-    payload: MemoGenerateRequest,
-    db: Session = Depends(get_db),
-):
-    """
-    Menghasilkan file Word (.docx) dengan narasi eksekutif kustom yang diedit pengguna pada UI.
-    """
-    return export_memo_word_get(
-        memo_type=memo_type,
-        masked=payload.masked or False,
-        narration=payload.custom_narration,
-        db=db,
-    )
-
-
-@app.get("/api/export/attachments")
-def export_official_attachments(
-    masked: bool = Query(False),
-    db: Session = Depends(get_db),
-):
-    """
-    Menghasilkan file Microsoft Excel (.xlsx) Paket 3 Lampiran Resmi:
-    - Sheet 1: Lampiran 1 - Sebelum Threshold (Capaian Mentah)
-    - Sheet 2: Lampiran 2 - Setelah Threshold (Skor Terbobot & Komposit)
-    - Sheet 3: Lampiran 3 - Tindak Lanjut (Status Kepatuhan & Rekomendasi Sanksi/Pembinaan)
-    """
-    period = get_active_period(db)
-    triwulan_str = period.Triwulan if period else "2026-Q2"
-
-    try:
-        excel_stream = generate_attachments_xlsx(db=db, masked=masked)
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Terjadi kesalahan saat menghasilkan berkas lampiran Excel: {str(e)}",
-        )
-
-    filename = f"Paket_3_Lampiran_Resmi_PUVA_{triwulan_str}.xlsx"
-
-    headers = {
-        "Content-Disposition": f"attachment; filename=\"{filename}\"",
-        "Access-Control-Expose-Headers": "Content-Disposition",
-    }
-
-    return StreamingResponse(
-        excel_stream,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers=headers,
-    )
+    })
 
 
 if __name__ == "__main__":

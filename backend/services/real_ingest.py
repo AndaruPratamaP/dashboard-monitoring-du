@@ -624,7 +624,11 @@ def _ingest_bbg_quotes(file_obj, resolver: EntityResolver, source: str) -> Dict[
                 valid += 1
         rate = round(valid / total * 100.0, 2)
         daily[bank.Bank_ID] = {"dates": [d.isoformat() for d in dates],
-                               **{t["key"]: [best.get((d, t["key"])) for d in dates] for t in tenors}}
+                               **{t["key"]: [best.get((d, t["key"])) for d in dates] for t in tenors},
+                               # (tanggal, tenor) yang hanya punya kuotasi satu sisi -> keterangan lampiran
+                               "satu_sisi": {t["key"]: [d.isoformat() for d in dates
+                                                        if best.get((d, t["key"])) is None and (d, t["key"]) in one]
+                                             for t in tenors}}
         raw_metrics[bank.Bank_ID] = {param: rate}
         breakdown[bank.Bank_ID] = {param: {
             "valid_days": valid, "total_days": total, "rate": rate,

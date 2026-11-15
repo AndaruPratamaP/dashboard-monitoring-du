@@ -369,12 +369,13 @@ export const DrillDownDrawer: React.FC = () => {
           {/* Drawer Footer Actions */}
           <div className="p-5 bg-slate-50 border-t border-slate-200 flex items-center justify-between gap-3">
             <a
-              href={`/api/export/worksheet/${drillDown.bankId}`}
+              href={`/api/confirmation/${drillDown.bankId}`}
               download
+              title="Workbook konfirmasi bank ini (format template DPPK)"
               className="flex items-center space-x-1.5 px-4 py-2 bg-white hover:bg-slate-100 text-slate-800 rounded-lg border border-slate-300 text-xs font-semibold shadow-xs transition-colors"
             >
               <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
-              <span>Unduh Lembar Kerja (.xlsx)</span>
+              <span>Workbook Konfirmasi (.xlsx)</span>
             </a>
 
             <div className="flex items-center space-x-2">

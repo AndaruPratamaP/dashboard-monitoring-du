@@ -9,12 +9,11 @@ import { SmartEtlView } from "@/components/SmartEtlView"
 import { BankWorkbooksView } from "@/components/BankWorkbooksView"
 import { ReconciliationView } from "@/components/ReconciliationView"
 import { DocGeneratorView } from "@/components/DocGeneratorView"
-import { BankPortalView } from "@/components/BankPortalView"
 import { DrillDownDrawer } from "@/components/DrillDownDrawer"
 import { RefreshCw } from "lucide-react"
 
 function DashboardContent() {
-  const { activeMenu, roleMode, isLoading } = useApp()
+  const { activeMenu, isLoading } = useApp()
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[#F8FAFC]">
@@ -36,8 +35,6 @@ function DashboardContent() {
                   Memuat Data Evaluasi DU PUVA...
                 </span>
               </div>
-            ) : roleMode === "BANK_DU" ? (
-              <BankPortalView />
             ) : (
               <>
                 {activeMenu === "matrix" && <ExecutiveMatrixView />}

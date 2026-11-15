@@ -1,5 +1,4 @@
 export type ThresholdStage = "EARLY" | "INTERMEDIATE" | "END_STATE"
-export type RoleMode = "BI" | "BANK_DU"
 export type ComplianceStatus = "MEMENUHI" | "TIDAK_MEMENUHI" | "DATA_BELUM_LENGKAP"
 
 export const PUVA_CODES = ["B1", "B2", "B3", "B4", "B5", "B6", "B7a", "B7b", "B8"] as const
@@ -12,7 +11,6 @@ export interface EvaluationPeriodInfo {
   active_threshold_stage: ThresholdStage
   is_active: boolean
   is_snapshot_locked: boolean
-  is_sample_data: boolean
   working_days_count: number
   mm_ois_sessions_count: number
 }

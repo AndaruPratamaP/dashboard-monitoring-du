@@ -6,7 +6,7 @@ Aplikasi ini menggantikan proses manual pengolahan data dari 5 sumber (Bloomberg
 
 ## 2. Tech Stack & Arsitektur
 - **Frontend:** Next.js (App Router, TypeScript), Tailwind CSS, Shadcn/UI, Lucide Icons, TanStack Table (untuk tabel matriks & filter kompleks), Recharts (visualisasi tren & gap pemenuhan).
-- **Backend / API Engine:** Python FastAPI (terintegrasi sebagai backend service) menggunakan `pandas` & `openpyxl` (pemrosesan multi-file Excel & ekspor lampiran), `python-docx` (pembuatan otomatis dokumen Word M.02 & M.01), serta `google-genai` (Gemini API untuk analisis bukti sanggahan & generasi narasi evaluasi).
+- **Backend / API Engine:** Python FastAPI (terintegrasi sebagai backend service) menggunakan `pandas` & `openpyxl` (pemrosesan multi-file Excel & ekspor lampiran), `python-docx` (pembuatan otomatis dokumen Word M.02 & M.01). (Rencana awal memakai `google-genai`/Gemini; diganti pre-check deterministik pada Sprint 4.)
 - **Database & File Storage:** Supabase (PostgreSQL + Storage Buckets) atau SQLite/PostgreSQL lokal dengan dukungan seeding data otomatis untuk keperluan Live Demo penguji.
 
 ## 3. Identitas Desain UI/UX Baru (Berbeda Total dari Prototype Lama)
@@ -49,6 +49,13 @@ Sediakan fitur input/impor nilai rekap untuk 3 parameter OM agar sistem dapat me
 - **Skor Komposit < 90%:** Tindak lanjut berupa **Sanksi Administratif Teguran Tertulis**.
 
 ## 5. Spesifikasi 5 Modul Fungsional Utama (MVP Workflow)
+> **Revisi implementasi (Sprint 1–5, lihat `BACKLOG.md`).** Spesifikasi awal di bawah dipertahankan sebagai catatan. Implementasi akhir berbeda di beberapa hal:
+> - Portal hanya untuk petugas BI. Mode simulasi Bank DU dihapus; bank mengirim balasan lewat workbook konfirmasi + email, lalu petugas mengimpornya.
+> - Analisis AI (Gemini) diganti **Pre-check PADG** deterministik per tanggal sanggahan. Keputusan tetap di tangan petugas.
+> - Sanggahan dinilai **per tanggal/tenor**, bukan per tiket. Ada ronde konfirmasi, dan item yang diajukan ulang dieskalasi ke pimpinan.
+> - Data sample sintetis (HARTIS per transaksi) dihapus. Semua parameter dihitung dari file kerja ril DPPK.
+> - Dokumen M.02, M.01, lampiran, dan surat dihasilkan dalam format dokumen ril TW III, tanpa narasi AI.
+
 1. **Smart Multi-Source ETL & Entity Resolution:**
    - Dropzone untuk mengunggah file mentah (.xlsx/.csv) dari Bloomberg, SPPA, Survey, HARTIS, dan DS Antasena.
    - Tabel *Master Entity Resolution* yang memetakan berbagai variasi penulisan nama/sandi 21 Bank DU asli ke satu ID Bank tunggal, dilengkapi fitur *Dynamic Aliasing* (`Bank A` s.d. `Bank U`).

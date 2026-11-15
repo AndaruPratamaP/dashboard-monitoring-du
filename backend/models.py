@@ -163,6 +163,26 @@ class SourceDataset(Base):
     Uploaded_At = Column(DateTime, default=datetime.datetime.utcnow)
 
 
+class UploadHistory(Base):
+    """
+    Riwayat file yang diproses sistem (file sumber, workbook counterparty, balasan bank) beserta hash SHA-256,
+    sehingga setiap angka di matriks dapat ditelusuri ke file dan versi file yang dipakai.
+    """
+    __tablename__ = "upload_history"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    period_id = Column(Integer, ForeignKey("evaluation_periods.id"), nullable=True, index=True)
+    Kind = Column(String(20), nullable=False)          # SUMBER / COUNTERPARTY / BALASAN
+    Source = Column(String(30), nullable=True)         # kode sumber (bbg-repo, ...) atau bank pengirim
+    File_Name = Column(String(255), nullable=False)
+    SHA256 = Column(String(64), nullable=False, index=True)
+    Size_Bytes = Column(Integer, nullable=True)
+    Origin = Column(String(10), nullable=False)        # UNGGAH (dari browser) / LOKAL (folder dataset)
+    Uploaded_By = Column(String(100), default="Petugas BI DPPK")
+    Uploaded_At = Column(DateTime, default=datetime.datetime.utcnow)
+    Result_Note = Column(Text, nullable=True)
+
+
 class CounterpartyLine(Base):
     """Counterparty line Repo/OIS milik bank DU per periode (dari workbook konfirmasi & balasan bank)."""
     __tablename__ = "counterparty_lines"

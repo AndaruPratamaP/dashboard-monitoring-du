@@ -431,9 +431,9 @@ export const ExecutiveMatrixView: React.FC = () => {
                     {/* Export Action */}
                     <td className="p-2 text-center border-l border-slate-200">
                       <a
-                        href={`/api/export/worksheet/${item.bank_id}`}
+                        href={`/api/confirmation/${item.bank_id}`}
                         download
-                        title={`Unduh Worksheet Excel (${item.masked_alias})`}
+                        title={`Workbook konfirmasi (${isMasked ? item.masked_alias : item.nama_resmi_bank})`}
                         className="inline-flex p-1.5 text-slate-500 hover:text-emerald-700 hover:bg-emerald-50 rounded-lg border border-transparent hover:border-emerald-200 transition-colors"
                       >
                         <FileSpreadsheet className="w-4 h-4" />
@@ -446,7 +446,9 @@ export const ExecutiveMatrixView: React.FC = () => {
               {filteredMatrix.length === 0 && (
                 <tr>
                   <td colSpan={15} className="p-8 text-center text-slate-500 text-xs">
-                    Tidak ada bank yang cocok dengan filter pencarian "{searchQuery}".
+                    {matrix.length === 0
+                      ? "Belum ada data evaluasi. Proses file sumber di menu Data Sumber; periode terbentuk dari tanggal di dalam file."
+                      : `Tidak ada bank yang cocok dengan filter pencarian "${searchQuery}".`}
                   </td>
                 </tr>
               )}

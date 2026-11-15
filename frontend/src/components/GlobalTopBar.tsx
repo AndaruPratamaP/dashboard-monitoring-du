@@ -2,14 +2,12 @@
 
 import React from "react"
 import { useApp } from "@/context/AppContext"
-import { ThresholdStage, RoleMode } from "@/types"
+import { ThresholdStage } from "@/types"
 import {
   Calendar,
   Layers,
   Eye,
   EyeOff,
-  UserCheck,
-  Building2,
   RefreshCw,
   SlidersHorizontal,
 } from "lucide-react"
@@ -23,11 +21,6 @@ export const GlobalTopBar: React.FC = () => {
     changeStage,
     isMasked,
     toggleMasked,
-    roleMode,
-    setRoleMode,
-    simulatedBankId,
-    setSimulatedBankId,
-    banks,
     isRecalculating,
     refreshData,
   } = useApp()
@@ -58,7 +51,6 @@ export const GlobalTopBar: React.FC = () => {
                 return (
                   <option key={p.id} value={p.id}>
                     Triwulan {roman} - {year}
-                    {p.is_sample_data ? " (data sample)" : ""}
                   </option>
                 )
               })}
@@ -97,7 +89,7 @@ export const GlobalTopBar: React.FC = () => {
           )}
         </div>
 
-        {/* Right Side: Privacy Masking Switch & Role Switcher */}
+        {/* Right Side: Privacy Masking Switch */}
         <div className="flex flex-wrap items-center gap-3">
           {/* 3. Privacy Masking Switch */}
           <button
@@ -121,51 +113,6 @@ export const GlobalTopBar: React.FC = () => {
               </>
             )}
           </button>
-
-          {/* 4. Interactive Role Switcher */}
-          <div className="flex items-center bg-slate-900 text-white rounded-lg p-1 border border-slate-800 shadow-sm">
-            <button
-              onClick={() => setRoleMode("BI")}
-              className={`flex items-center space-x-1.5 px-3 py-1 rounded-md text-xs font-medium transition-all ${
-                roleMode === "BI"
-                  ? "bg-emerald-600 text-white shadow-xs font-semibold"
-                  : "text-slate-300 hover:text-white"
-              }`}
-            >
-              <Building2 className="w-3.5 h-3.5" />
-              <span>Internal BI</span>
-            </button>
-
-            <button
-              onClick={() => setRoleMode("BANK_DU")}
-              className={`flex items-center space-x-1.5 px-3 py-1 rounded-md text-xs font-medium transition-all ${
-                roleMode === "BANK_DU"
-                  ? "bg-emerald-600 text-white shadow-xs font-semibold"
-                  : "text-slate-300 hover:text-white"
-              }`}
-            >
-              <UserCheck className="w-3.5 h-3.5" />
-              <span>Portal Bank DU</span>
-            </button>
-          </div>
-
-          {/* Bank Selection Dropdown when in Bank DU Simulation Mode */}
-          {roleMode === "BANK_DU" && (
-            <div className="flex items-center bg-emerald-50 border border-emerald-300 rounded-lg px-2.5 py-1.5 text-xs text-emerald-900 shadow-xs animate-in fade-in slide-in-from-top-1 duration-200">
-              <span className="text-[11px] font-semibold text-emerald-700 mr-2">Simulasi:</span>
-              <select
-                value={simulatedBankId}
-                onChange={(e) => setSimulatedBankId(e.target.value)}
-                className="bg-transparent font-bold text-emerald-950 cursor-pointer focus:outline-none"
-              >
-                {banks.map((b) => (
-                  <option key={b.bank_id} value={b.bank_id}>
-                    {isMasked ? `${b.masked_alias} (${b.bank_id})` : `${b.nama_resmi_bank} (${b.masked_alias})`}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
 
           {/* Refresh Manual Button */}
           <button

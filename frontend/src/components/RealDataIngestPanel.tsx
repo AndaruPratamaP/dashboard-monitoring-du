@@ -3,6 +3,7 @@
 import React, { useRef, useState } from "react"
 import { useApp } from "@/context/AppContext"
 import { CounterpartyLineEditor } from "@/components/CounterpartyLineEditor"
+import { ReplySheetMapper } from "@/components/ReplySheetMapper"
 import {
   AlertTriangle,
   CheckCircle2,
@@ -677,6 +678,7 @@ export const RealDataIngestPanel: React.FC = () => {
                                     <span className="text-slate-400">
                                       ({w.sheet.filter((x) => x.catatan.startsWith("dibaca")).length} sheet dibaca)
                                     </span>
+                                    <ReplySheetMapper bankId={b.bank_id} file={w.file} onSaved={refreshData} />
                                   </div>
                                 ))}
                           </td>

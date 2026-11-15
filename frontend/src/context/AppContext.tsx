@@ -3,7 +3,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from "react"
 import {
   ThresholdStage,
-  RoleMode,
   MasterBank,
   BankScoreMatrixItem,
   FindingTicketItem,
@@ -31,11 +30,7 @@ interface AppContextType {
   setIsMasked: (masked: boolean) => void
   toggleMasked: () => void
 
-  roleMode: RoleMode
-  setRoleMode: (mode: RoleMode) => void
 
-  simulatedBankId: string
-  setSimulatedBankId: (id: string) => void
 
   matrix: BankScoreMatrixItem[]
   banks: MasterBank[]
@@ -62,8 +57,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const activePeriod = periods.find((p) => p.is_active) || null
   const [selectedStage, setSelectedStage] = useState<ThresholdStage>("EARLY")
   const [isMasked, setIsMasked] = useState<boolean>(true) // Default true: Mode Alias (Bank A - Bank U)
-  const [roleMode, setRoleMode] = useState<RoleMode>("BI")
-  const [simulatedBankId, setSimulatedBankId] = useState<string>("DU-01")
 
   const [matrix, setMatrix] = useState<BankScoreMatrixItem[]>([])
   const [banks, setBanks] = useState<MasterBank[]>([])
@@ -192,10 +185,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         isMasked,
         setIsMasked,
         toggleMasked,
-        roleMode,
-        setRoleMode,
-        simulatedBankId,
-        setSimulatedBankId,
         matrix,
         banks,
         findings,

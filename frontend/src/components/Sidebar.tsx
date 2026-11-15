@@ -10,7 +10,6 @@ import {
   FileText,
   ChevronLeft,
   ChevronRight,
-  ShieldAlert,
   Building,
   CheckCircle2,
 } from "lucide-react"
@@ -22,7 +21,6 @@ export const Sidebar: React.FC = () => {
     isSidebarCollapsed,
     toggleSidebar,
     findings,
-    roleMode,
   } = useApp()
 
   const pendingFindingsCount = findings.filter(
@@ -37,24 +35,24 @@ export const Sidebar: React.FC = () => {
     },
     {
       id: "etl",
-      label: "Smart ETL & Data Hub",
+      label: "Data Sumber",
       icon: Database,
     },
     {
       id: "workbooks",
-      label: "Bank Workbooks & EWS",
+      label: "Workbook Konfirmasi",
       icon: FileSpreadsheet,
     },
     {
       id: "reconciliation",
-      label: "Reconciliation Center",
+      label: "Rekonsiliasi Sanggahan",
       icon: Scale,
       badge: pendingFindingsCount > 0 ? `${pendingFindingsCount}` : undefined,
       badgeColor: "bg-rose-950/80 text-rose-300 border border-rose-500/40",
     },
     {
       id: "snapshot",
-      label: "Snapshot & Doc Gen",
+      label: "Snapshot & Dokumen",
       icon: FileText,
     },
   ]
@@ -100,31 +98,15 @@ export const Sidebar: React.FC = () => {
         </button>
       </div>
 
-      {/* Role Indicator Banner */}
-      <div className="px-3 pt-3 pb-1">
-        {!isSidebarCollapsed ? (
-          <div className={`p-2 rounded-lg border text-xs flex items-center justify-between ${
-            roleMode === "BI"
-              ? "bg-slate-800/60 border-slate-700 text-slate-300"
-              : "bg-emerald-950/40 border-emerald-500/40 text-emerald-300"
-          }`}>
-            <div className="flex items-center space-x-2 truncate">
-              {roleMode === "BI" ? (
-                <Building className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-              ) : (
-                <ShieldAlert className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-              )}
-              <span className="truncate font-medium">
-                {roleMode === "BI" ? "Internal BI" : "Portal Bank DU"}
-              </span>
-            </div>
+      {/* Pengguna: hanya petugas BI (portal internal) */}
+      {!isSidebarCollapsed && (
+        <div className="px-3 pt-3 pb-1">
+          <div className="p-2 rounded-lg border text-xs flex items-center space-x-2 bg-slate-800/60 border-slate-700 text-slate-300">
+            <Building className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+            <span className="truncate font-medium">Internal BI - Tim Evaluasi DPPK</span>
           </div>
-        ) : (
-          <div className="flex justify-center" title={`Mode: ${roleMode}`}>
-            <div className={`w-3 h-3 rounded-full ${roleMode === "BI" ? "bg-emerald-500 ring-2 ring-emerald-500/30" : "bg-blue-500 ring-2 ring-blue-500/30"}`} />
-          </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* Navigation Menu */}
       <nav className="flex-1 px-3 py-2 space-y-1 overflow-y-auto">

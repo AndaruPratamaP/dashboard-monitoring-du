@@ -33,7 +33,7 @@ export const BankWorkbooksView: React.FC = () => {
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h2 className="text-xl font-bold text-slate-900 tracking-tight">
-            Bank Workbooks & Early Warning System (EWS)
+            Workbook Konfirmasi Bank
           </h2>
         </div>
 
@@ -164,15 +164,6 @@ export const BankWorkbooksView: React.FC = () => {
 
               {/* Card Footer Action */}
               <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-end gap-2">
-                <a
-                  href={`/api/export/worksheet/${item.bank_id}`}
-                  download
-                  title="Ringkasan hasil evaluasi bank (internal BI)"
-                  className="flex items-center space-x-1.5 px-3 py-1.5 border border-slate-300 hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-semibold transition-colors"
-                >
-                  <FileSpreadsheet className="w-3.5 h-3.5" />
-                  <span>Ringkasan</span>
-                </a>
                 <a
                   href={`/api/confirmation/${item.bank_id}`}
                   download

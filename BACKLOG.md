@@ -45,7 +45,7 @@ Fokusnya otomasi proses, bukan AI.
 | ✅ E0-1 | Sebagai tim, saya memakai **dataset TW III ril** sebagai data demo, menggantikan `sample_datasets_puva_2026Q2`. | Mentor mengizinkan data tanpa anonimisasi untuk demo. Folder data ril **tidak di-commit** ke GitHub (gitignore); lokasi diatur lewat env `REAL_DATASET_DIR`. | P0 | S |
 | ✅ E0-2 | Sebagai admin, saya mengelola **master 21 bank** dengan semua kode: suffix BBG (`BRIJ`, `MDRI`, …), sandi bank (`002`, `008`, …), nama HARTIS, alias. | Resolver memetakan semua variasi di file ril tanpa error; bank tak dikenal muncul sebagai peringatan, bukan diabaikan. | P0 | S |
 | ✅ E0-3 | Sebagai admin, saya mengatur **periode evaluasi**: kalender hari kerja dan tanggal sesi matchmaking OIS. | Jumlah hari kerja tidak lagi hardcode 60; target 60% hari kerja dihitung dari kalender. | P0 | S |
-| E0-4 | Sebagai sistem, saya mencatat **riwayat upload** (file, pengunggah, waktu, hash). | Setiap angka di matriks bisa ditelusuri ke file sumbernya. | P1 | S |
+| ✅ E0-4 | Sebagai sistem, saya mencatat **riwayat upload** (file, pengunggah, waktu, hash). | Setiap angka di matriks bisa ditelusuri ke file sumbernya. **Status:** file sumber, counterparty, dan balasan bank tercatat dengan SHA-256 dan status versi (baru / berubah / sama); tampil di Data Sumber. | P1 | S |
 
 ### E1 — Ingest kuotasi BBG Gen-2 (B1–B3)
 
@@ -69,7 +69,7 @@ Fokusnya otomasi proses, bukan AI.
 |---|---|---|---|---|
 | ✅ E3-1 | Upload rekap **Repo 2m** dan **SRBI 3b** (matriks tanggal × bank, volume harian). | Hari dengan volume > 0 dihitung; % terhadap target 60% hari kerja; golden test lolos. | P0 | M |
 | ✅ E3-2 | Upload rekap **SRBI Rasio Primer** (jual sekunder vs perdana per bank). | Rasio = sekunder ÷ perdana; kewajiban ≥ 30%; pemenuhan vs threshold tahap. | P0 | S |
-| ◐ E3-3 | Hapus logika lama berbasis HARTIS per-transaksi (tenor per deal) yang tidak punya data ril. | Rule engine B6/B7 memakai input rekap; sanggahan B7 berbasis per tanggal. **Status:** data ril B6/B7 sudah lewat rekap; logika HARTIS tinggal dipakai dataset sample TW II dan dihapus bersama sample (E0-1 lanjutan, Sprint 5). | P0 | S |
+| ✅ E3-3 | Hapus logika lama berbasis HARTIS per-transaksi (tenor per deal) yang tidak punya data ril. | Rule engine B6/B7 memakai input rekap; sanggahan B7 berbasis per tanggal. **Status:** logika HARTIS, dataset sample TW II, dan sanggahan per tiket dihapus (Sprint 5). | P0 | S |
 
 ### E4 — Counterparty line (B4, B5)
 
@@ -90,7 +90,7 @@ Fokusnya otomasi proses, bukan AI.
 
 | ID | Story | Kriteria terima | P | Size |
 |---|---|---|---|---|
-| ◐ E6-1 | Sebagai petugas BI, saya upload workbook balasan bank; sistem mengenali sheet walau **nama berubah** (mis. `Kuotasi SRBI, Repo & OIS`). | Fuzzy match nama sheet + fallback mapping manual di UI. **Status:** fuzzy match, sheet `(response)`, dan tabel versi bank di samping tabel BI (`BDI CHECK`) terbaca; pemetaan sheet tampil per file. Pemetaan manual per sheet belum ada; penggantinya **sanggahan manual** per tanggal. | P0 | M |
+| ✅ E6-1 | Sebagai petugas BI, saya upload workbook balasan bank; sistem mengenali sheet walau **nama berubah** (mis. `Kuotasi SRBI, Repo & OIS`). | Fuzzy match nama sheet + fallback mapping manual di UI. **Status:** fuzzy match, sheet `(response)`, dan tabel versi bank di samping tabel BI (`BDI CHECK`) terbaca; pemetaan sheet tampil per file. Pemetaan manual per sheet tersedia lewat **atur sheet** (Sprint 5); pemetaan tersimpan dan tetap dipakai saat impor ulang. | P0 | M |
 | ✅ E6-2 | Sistem membandingkan isian bank vs rekap BI **per tanggal per kewajiban** dan otomatis membuat tiket sanggahan untuk setiap selisih. | Tiket berisi tanggal, nilai BI, nilai bank, keterangan bank. | P0 | L |
 | ✅ E6-3 | File yang tidak bisa diproses (ber-password, 7z, terlalu besar) ditandai **perlu tindakan manual** dengan alasan yang jelas. | Tidak ada crash; status terlihat di daftar balasan. | P0 | S |
 | ✅ E6-4 | Lampiran bukti (PDF/PNG/JPEG) diunggah per tiket dan tampil di previewer split-screen. | Gambar & PDF tampil in-app. | P1 | M |
@@ -103,7 +103,7 @@ Fokusnya otomasi proses, bukan AI.
 | ✅ E7-2 | Pre-check deterministik: tolak otomatis bila klaim < threshold, B7a bergantung pada transaksi gugur; selain itu → verifikasi petugas. | Sudah ada; perlu disesuaikan ke sanggahan per tanggal (E3-3). | P0 | S |
 | ✅ E7-3 | **Ronde konfirmasi**: setiap kirim–balas tercatat sebagai ronde (1, 2, 3, …) dengan tenggat; tiket menyimpan riwayat argumen tiap ronde. | Audit trail menunjukkan siapa, kapan, ronde berapa. | P0 | M |
 | ✅ E7-4 | Tiket otomatis **CLOSED** bila parameter lolos setelah rekalkulasi / ganti tahap. | Tidak ada tiket OPEN basi. | P0 | S |
-| ◐ E7-5 | Eskalasi: tiket yang melewati N ronde ditandai **perlu keputusan pimpinan** dan masuk lampiran M.02. | Menjawab pain point "sama-sama ngeyel ga kelar". **Status:** tanda eskalasi (item masih diperdebatkan ≥ 2 ronde) sudah ada; masuk lampiran M.02 bersama E9-1. | P1 | S |
+| ✅ E7-5 | Eskalasi: tiket yang melewati N ronde ditandai **perlu keputusan pimpinan** dan masuk lampiran M.02. | Menjawab pain point "sama-sama ngeyel ga kelar". **Status:** item yang masih diperdebatkan ≥ 2 ronde masuk **Lampiran II M.02** dengan kolom keputusan pimpinan, dan disebut di poin IV.3 memo. | P1 | S |
 | ✅ E7-6 | Keputusan petugas menghitung ulang skor via rule engine; nilai disetujui bertahan saat ETL ulang; snapshot lock memblokir perubahan. | Sudah dikerjakan. | — | — |
 
 ### E8 — Skor akhir tanpa OM
@@ -117,17 +117,17 @@ Fokusnya otomasi proses, bukan AI.
 
 | ID | Story | Kriteria terima | P | Size |
 |---|---|---|---|---|
-| E9-1 | Sesuaikan M.02, M.01, dan lampiran dengan format dokumen ril di `Dokumen Final` & folder periode. | Struktur & kalimat baku mengikuti dokumen TW III. | P0 | M |
-| E9-2 | Generate **Surat Informasi Pemenuhan Kewajiban** per bank. | 21 surat dari snapshot terkunci. | P1 | M |
+| ✅ E9-1 | Sesuaikan M.02, M.01, dan lampiran dengan format dokumen ril di `Dokumen Final` & folder periode. | Struktur & kalimat baku mengikuti dokumen TW III. **Status:** golden test: setelah keputusan sanggahan, ringkasan (15/6, 19/2), kalimat per bank, nilai per tenor, dan keterangan per tanggal sama dengan M.02 ril. | P0 | M |
+| ✅ E9-2 | Generate **Surat Informasi Pemenuhan Kewajiban** per bank. | 21 surat dari snapshot terkunci. **Status:** format ril adalah satu surat dengan lampiran daftar 21 penerima. Tenggat diambil dari ronde konfirmasi, posisi counterparty dari akhir triwulan. | P1 | M |
 | ✅ E9-3 | Snapshot lock sebelum generate dokumen. | Sudah ada. | — | — |
 
 ### E10 — Kualitas & demo
 
 | ID | Story | Kriteria terima | P | Size |
 |---|---|---|---|---|
-| E10-1 | Ubah `test_stage*.py` menjadi **pytest** dengan DB sementara + golden test per parser. | `pytest` hijau tanpa menyentuh DB lokal. | P0 | M |
-| E10-2 | Hapus mode "Bank DU Portal Simulation"; login sederhana untuk petugas BI saja. | Tidak ada tampilan yang mengesankan bank mengakses sistem. | P1 | M |
-| E10-3 | Skenario demo 10 menit: upload raw → matriks → generate workbook → import balasan → tiket → keputusan → lock → M.02. | Skrip demo tertulis dan diuji. | P0 | S |
+| ✅ E10-1 | Ubah `test_stage*.py` menjadi **pytest** dengan DB sementara + golden test per parser. | `pytest` hijau tanpa menyentuh DB lokal. **Status:** `backend/tests/`: 17 unit test + 11 golden test TW III (dilewati bila dataset ril tidak ada). | P0 | M |
+| ◐ E10-2 | Hapus mode "Bank DU Portal Simulation"; login sederhana untuk petugas BI saja. | Tidak ada tampilan yang mengesankan bank mengakses sistem. **Status:** mode portal bank dan endpoint-nya dihapus. Login belum ada: portal berjalan di jaringan internal BI. | P1 | M |
+| ✅ E10-3 | Skenario demo 10 menit: upload raw → matriks → generate workbook → import balasan → tiket → keputusan → lock → M.02. | Skrip demo tertulis dan diuji. **Status:** `DEMO.md` + `start_app.bat demo` (database demo kosong); alur yang sama diuji `test_real_tw3.py`. | P0 | S |
 | E10-4 | Upgrade Next.js 13.5 → versi terbaru yang stabil; gitignore `tsconfig.tsbuildinfo`. | Build & dev jalan. | P2 | S |
 
 ## 4. Urutan pengerjaan
@@ -140,7 +140,7 @@ Asumsi ±1 minggu per sprint, satu orang.
 | 2 ✅ | Parser terberat | E1-1 s.d. E1-4, E3-1, E3-3 | Matriks B1–B3, B6–B8 dari data ril, lolos golden test |
 | 3 ✅ | Siklus konfirmasi | E4-1, E4-2, E5-1 | Counterparty line dari balasan bank; workbook konfirmasi ter-generate |
 | 4 ✅ | Rekonsiliasi | E6-1, E6-2, E6-3, E7-1, E7-3, E7-4 | Balasan bank ril diimpor → tiket otomatis → keputusan |
-| 5 | Finalisasi | E9-1, E10-1, E10-3, sisa P1 | Demo end-to-end + dokumen akhir |
+| 5 ✅ | Finalisasi | E9-1, E10-1, E10-3, sisa P1 | Demo end-to-end + dokumen akhir |
 
 Bila waktu sempit, potong dari bawah: P2 → P1 → E6-1 fuzzy (ganti mapping manual saja).
 
@@ -149,8 +149,9 @@ Bila waktu sempit, potong dari bawah: P2 → P1 → E6-1 fuzzy (ganti mapping ma
 - Jalur Gemini (`analyze_dispute_with_ai` → pre-check murni).
 - Seluruh komponen OM (DPMA).
 - Parser HARTIS per-transaksi & kolom `Tenor_Hari` / `Sisa_Jangka_Waktu_Bulan` (tidak ada data ril).
-- `generate_sample_dataset.py` & `sample_datasets_puva_2026Q2/` setelah E0-1 selesai.
-- `seed.py`: tiket sanggahan "expected AI" dari file 05.
+- `generate_sample_dataset.py` & `sample_datasets_puva_2026Q2/` (dihapus Sprint 5; periode sample di database lama dibersihkan otomatis saat startup).
+- `seed.py`: tiket sanggahan "expected AI" dari file 05 (dihapus Sprint 5; seed hanya master bank).
+- Mode Portal Bank DU, EWS reminder, worksheet per bank lama, sanggahan & keputusan per tiket (`/api/disputes/submit`, `/api/reconciliation/*`), dan generator dokumen lama `doc_generator.py` (Sprint 5).
 
 ## 6. Keputusan mentor (12 Nov 2026)
 
@@ -251,3 +252,47 @@ Belum dikerjakan (sisa P1, masuk Sprint 5):
 - Pemetaan sheet manual di UI (E6-1).
 - Item eskalasi masuk lampiran M.02 (E7-5).
 - Riwayat upload ber-hash untuk file sumber (E0-4).
+
+## 10. Catatan Sprint 5 (13 Nov 2026)
+
+**Dokumen akhir format ril** (`services/documents.py`, layar *Snapshot & Dokumen*).
+- Isinya: M.02, Lampiran M.02, M.01, Lampiran M.01, Surat ke bank DU, dan Matriks Excel. Semua bisa diunduh satu per satu atau sebagai ZIP.
+- Lampiran mengikuti dokumen TW III:
+  - matriks per tenor *sebelum* threshold (target 100% / min 30% / 60% / 10 line);
+  - matriks per tenor *setelah* threshold (early stage: 80% / 24% / 48% / 5 line), dengan nilai Mean/Median;
+  - tabel **Keterangan Hasil Evaluasi** per bank yang dirakit dari tanggal gugur. Contoh: "Tidak terdapat kuotasi OIS tenor 3 bulan dan 12 bulan pada tanggal: 16 Juli 2026; dan 6 Agustus 2026."
+- Angka dihitung dari data harian BI ditambah sanggahan yang diterima. Status lolos threshold mengikuti rule engine.
+- Golden test: setelah keputusan TW III (semua sanggahan diterima kecuali BRI SRBI 28 Sep, BTN SRBI 13 Jul, dan Deutsche Repo 1W 21 Jul), hasilnya **sama dengan M.02 ril**:
+  - 15 bank 100%;
+  - 6 bank belum: BRI, BCA, Deutsche, HSBC, BTN, Panin;
+  - setelah threshold 19 lolos dan 2 tidak: Deutsche, HSBC;
+  - nilai per tenor sama dengan matriks lampiran ril.
+- Kuotasi yang hanya satu sisi kini disimpan per tanggal. Keterangannya dibedakan dari "tidak ada kuotasi".
+- Sebelum snapshot dikunci, dokumen diberi header **DRAFT**. Nama pejabat dan email unit diambil dari `backend/.env` (`DOC_*`); bila kosong, dipakai placeholder.
+
+**Eskalasi ke pimpinan (E7-5).** Item yang ditolak lalu diajukan lagi di ronde berikutnya masuk **Lampiran II M.02**, lengkap dengan kolom keputusan pimpinan, serta disebut di poin II.5 dan IV.3 memo.
+
+**Riwayat upload ber-hash (E0-4).** Setiap file sumber, workbook counterparty, dan balasan bank dicatat beserta SHA-256, ukuran, asal (unggahan/folder lokal), waktu, dan status versi.
+
+**Pemetaan sheet manual (E6-1).** Tersedia lewat tombol **atur sheet** di kartu Balasan bank. Pilihannya: jenis sheet template atau *abaikan*. Setelah disimpan:
+- workbook diproses ulang;
+- item OPEN yang tidak lagi terbentuk dihapus;
+- pemetaan disimpan untuk impor berikutnya.
+
+**Pembersihan (E3-3, E10-2).**
+- Yang dihapus:
+  - data sample TW II, parser HARTIS, dan seed sample;
+  - mode Portal Bank DU, EWS reminder, dan worksheet per bank lama;
+  - sanggahan & keputusan per tiket beserta pre-check per tiket.
+- Database baru hanya berisi master 21 bank. Periode sample di database lama dihapus otomatis saat startup.
+- Menu diberi nama Indonesia: Data Sumber, Workbook Konfirmasi, Rekonsiliasi Sanggahan, Snapshot & Dokumen.
+
+**Kualitas & demo (E10-1, E10-3).**
+- `backend/tests/` (pytest, database sementara) berisi 28 test.
+- `DEMO.md` berisi skenario 10 menit. `start_app.bat demo` menjalankan aplikasi dengan database demo kosong.
+- Alur penuh dari database kosong, termasuk "Proses Semua File Lokal" (±25 detik), sudah dicek di browser.
+
+Masih terbuka:
+- Pertanyaan 5: batas Repo 1 minggu 10 vs 20 bps.
+- Login petugas BI (E10-2), bila portal akan dipasang di luar jaringan internal.
+- Upgrade Next.js (E10-4, P2).

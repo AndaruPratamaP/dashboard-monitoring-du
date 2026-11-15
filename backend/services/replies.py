@@ -317,29 +317,49 @@ PARSERS = {"repo-2m": parse_volume, "srbi-3b": parse_volume, "mm-ois": parse_mm_
            "srbi-ratio": parse_srbi_ratio, "quotes": parse_quotes}
 
 
-def parse_reply(sheets: Dict[str, List[List[Any]]]) -> Dict[str, Any]:
-    """Isian bank per sumber data + daftar pemetaan sheet (dikenali / diabaikan)."""
+SHEET_KINDS = {  # pilihan pemetaan manual (label = nama sheet template)
+    "srbi-ratio": "Rasio SRBI Minimal 30% (B6)",
+    "repo-2m": "Transaksi Repo Minimal 2 Minggu (B7a)",
+    "srbi-3b": "Transaksi SRBI 3 Bulan (B7b)",
+    "mm-ois": "Partisipasi MM OIS (B8)",
+    "quotes": "Kuotasi SRBI, Repo & OIS (B1-B3)",
+    "abaikan": "Abaikan sheet ini",
+}
+
+
+def parse_reply(sheets: Dict[str, List[List[Any]]], overrides: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+    """
+    Isian bank per sumber data + daftar pemetaan sheet (dikenali / diabaikan).
+    `overrides` = pemetaan manual petugas {nama sheet: jenis | "abaikan"} yang menggantikan fuzzy match.
+    """
+    overrides = overrides or {}
     found: Dict[str, Any] = {}
     mapping = []
     quotes = []
     for title, rows in sheets.items():
-        kind = classify_sheet(title)
+        manual = title in overrides
+        kind = overrides[title] if manual else classify_sheet(title)
+        if kind == "abaikan":
+            mapping.append({"sheet": title, "jenis": None, "catatan": "diabaikan (pemetaan petugas)", "manual": True})
+            continue
         if kind is None:
             if "counterparty" not in title.lower() and title.strip().lower() != "index":
                 mapping.append({"sheet": title, "jenis": None, "catatan": "tidak dikenali, diabaikan"})
             continue
         data = PARSERS[kind](rows)
         if data is None:
-            mapping.append({"sheet": title, "jenis": kind, "catatan": "struktur tabel tidak ditemukan, diabaikan"})
+            mapping.append({"sheet": title, "jenis": kind, "catatan": "struktur tabel tidak ditemukan, diabaikan",
+                            "manual": manual})
             continue
         if kind == "quotes":
             quotes.append((title, data))
             continue
         if kind in found:
-            mapping.append({"sheet": title, "jenis": kind, "catatan": "duplikat, diabaikan"})
+            mapping.append({"sheet": title, "jenis": kind, "catatan": "duplikat, diabaikan", "manual": manual})
             continue
         found[kind] = data
-        mapping.append({"sheet": title, "jenis": kind, "catatan": "dibaca"})
+        mapping.append({"sheet": title, "jenis": kind, "catatan": "dibaca" + (" (pemetaan petugas)" if manual else ""),
+                        "manual": manual})
     # Kuotasi: sheet tanggapan ("response"/"respon"/"revisi") menimpa sheet salinan template untuk instrumennya
     quotes.sort(key=lambda t: any(w in t[0].lower() for w in ("respon", "revisi", "tanggapan")))
     for title, data in quotes:
@@ -348,7 +368,8 @@ def parse_reply(sheets: Dict[str, List[List[Any]]]) -> Dict[str, Any]:
         for src in own:
             found[src] = {"days": data["days"], "notes": data["notes"], "sheet": title}
         mapping.append({"sheet": title, "jenis": "kuotasi " + "/".join(s.split("-")[1].upper() for s in own),
-                        "catatan": "dibaca" + (" (tanggapan bank)" if respon else "")})
+                        "catatan": "dibaca" + (" (tanggapan bank)" if respon else "") + (
+                            " (pemetaan petugas)" if title in overrides else ""), "manual": title in overrides})
     return {"data": found, "mapping": mapping}
 
 
@@ -505,6 +526,13 @@ def diff_reply(db: Session, period_id: int, bank_id: str, parsed: Dict[str, Any]
 # ------------------------------------------------------------------------------
 # Nilai parameter setelah item sanggahan DITERIMA
 # ------------------------------------------------------------------------------
+ESCALATE_AFTER_ROUNDS = 2  # item yang masih diperdebatkan sejak >= 2 ronde -> perlu keputusan pimpinan
+
+
+def needs_escalation(item: DisputeItem) -> bool:
+    return item.Status == "OPEN" and (item.Last_Round - item.Round_No + 1) >= ESCALATE_AFTER_ROUNDS
+
+
 def accepted_overrides(db: Session, period_id: int, bank_id: Optional[str] = None) -> Dict[Tuple[str, str], List[DisputeItem]]:
     q = db.query(DisputeItem).filter(DisputeItem.period_id == period_id, DisputeItem.Status == "DITERIMA")
     if bank_id:
