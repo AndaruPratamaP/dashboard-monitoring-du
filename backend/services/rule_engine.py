@@ -59,7 +59,7 @@ PARAMETER_NAMES = {
 }
 
 PARAMETER_DETAILS = {
-    "B1": "Setiap hari kerja; spread maks. 5 bps (O/N) & maks. 20 bps (1W, 1M). Batas 1W menunggu konfirmasi (template BI: 10 bps)",
+    "B1": "Setiap hari kerja; spread maks. 5 bps (O/N), 10 bps (1W), 20 bps (1M)",
     "B2": "Setiap hari kerja; kuotasi dua sisi; spread maks. 20 bps untuk seluruh seri yang dikuotasi",
     "B3": "Setiap hari kerja; tenor 3 bulan & 12 bulan; spread maks. 20 bps",
     "B4": "Minimal 10 bank DU dan 10 bank non-DU pada akhir periode",

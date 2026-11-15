@@ -32,7 +32,6 @@ interface IngestResult {
   crosscheck: { available: boolean; differences: Array<Record<string, any>> }
   unknown_banks: string[]
   source_notes?: Array<{ bank_id: string; catatan: string }>
-  threshold_notes?: Array<{ tenor: string; batas_dipakai_bps: number; batas_alternatif_bps: number; catatan: string; bank_terdampak: string[] }>
 }
 
 interface SourceDef {
@@ -47,7 +46,7 @@ const GROUPS: Array<{ title: string; desc: string; sources: SourceDef[] }> = [
     title: "Kuotasi Bloomberg",
     desc: "Worksheet Price Quotation Gen 2: satu sheet per bank (kode BBG), spread = |bid − ask| × 100 bps.",
     sources: [
-      { key: "bbg-repo", param: "B1", title: "Kuotasi Repo (O/N ≤ 5 bps; 1 bulan ≤ 20 bps; 1 minggu ≤ 20 bps*)", file: "*Repo Price Quotation*.xlsx" },
+      { key: "bbg-repo", param: "B1", title: "Kuotasi Repo (O/N ≤ 5 bps; 1 minggu ≤ 10 bps; 1 bulan ≤ 20 bps)", file: "*Repo Price Quotation*.xlsx" },
       { key: "bbg-srbi", param: "B2", title: "Kuotasi SRBI (spread maks. seluruh seri ≤ 20 bps)", file: "*SRBI Price Quotation*.xlsx" },
       { key: "bbg-ois", param: "B3", title: "Kuotasi OIS (3 bulan & 12 bulan ≤ 20 bps)", file: "*OIS Price Quotation*.xlsx" },
     ],
@@ -358,18 +357,6 @@ export const RealDataIngestPanel: React.FC = () => {
                         </div>
                       </div>
                     </div>
-
-                    {(result.threshold_notes || []).map((t) => (
-                      <div key={t.tenor} className="flex items-start gap-2 p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-900">
-                        <Info className="w-4 h-4 flex-shrink-0 mt-0.5" />
-                        <div>
-                          * {t.catatan} Dipakai {t.batas_dipakai_bps} bps. Simulasi {t.batas_alternatif_bps} bps:{" "}
-                          {t.bank_terdampak.length === 0
-                            ? "tidak ada bank yang hasilnya berubah."
-                            : `berubah untuk ${t.bank_terdampak.map((b) => nameOf(result, b)).join(", ")}.`}
-                        </div>
-                      </div>
-                    ))}
 
                     {notes.length > 0 && (
                       <div className="flex items-start gap-2 p-2.5 rounded-lg bg-sky-50 border border-sky-200 text-sky-900">

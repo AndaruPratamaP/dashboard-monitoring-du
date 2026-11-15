@@ -404,11 +404,8 @@ QUOTE_SOURCES = {
         "param": "B1", "instrument": "Repo",
         "tenors": [  # urutan = urutan kolom per bank pada sheet Rekap
             {"key": "on", "label": "O/N", "tickers": ["RB00UAP2"], "max_bps": 5.0, "ref": "ON"},
-            # Batas 1 minggu BELUM FINAL: M.01 menyebut maks. 20 bps, sedangkan template kuotasi BI
-            # (COUNTIF <=10 / <11) memakai 10 bps. Sistem memakai 20 bps dan melaporkan sensitivitas 10 bps.
-            {"key": "1w", "label": "1 minggu", "tickers": ["RB00UAP6"], "max_bps": 20.0, "ref": "1W",
-             "alt_max_bps": 10.0,
-             "catatan_batas": "Batas Repo 1 minggu menunggu konfirmasi: M.01 menyebut 20 bps, template kuotasi BI menghitung <= 10 bps."},
+            # Batas 1 minggu = 10 bps sesuai ketentuan (dikonfirmasi pemilik produk 15 Nov 2026; sama dengan template kuotasi BI)
+            {"key": "1w", "label": "1 minggu", "tickers": ["RB00UAP6"], "max_bps": 10.0, "ref": "1W"},
             {"key": "1m", "label": "1 bulan", "tickers": ["RB00UAP9"], "max_bps": 20.0, "ref": "1M"},
         ],
     },
@@ -579,18 +576,8 @@ def _ingest_bbg_quotes(file_obj, resolver: EntityResolver, source: str) -> Dict[
         best, one = spreads[bank.Bank_ID], one_sided[bank.Bank_ID]
         valid, gugur = 0, []
         per_tenor_valid = {t["key"]: 0 for t in tenors}
-        alt_valid, alt_days = 0, {t["key"]: [] for t in tenors if t.get("alt_max_bps")}
         for d in dates:
             problems = []
-            alt_ok = True
-            for t in tenors:
-                sp = best.get((d, t["key"]))
-                lim = t.get("alt_max_bps", t["max_bps"])
-                if sp is None or sp > lim:
-                    alt_ok = False
-                    if t.get("alt_max_bps") and sp is not None and t["alt_max_bps"] < sp <= t["max_bps"]:
-                        alt_days[t["key"]].append({"tanggal": d.isoformat(), "spread_bps": sp})
-            alt_valid += alt_ok
             for t in tenors:
                 sp = best.get((d, t["key"]))
                 if sp is None:
@@ -633,11 +620,6 @@ def _ingest_bbg_quotes(file_obj, resolver: EntityResolver, source: str) -> Dict[
         breakdown[bank.Bank_ID] = {param: {
             "valid_days": valid, "total_days": total, "rate": rate,
             "valid_per_tenor": {t["label"]: per_tenor_valid[t["key"]] for t in tenors},
-            **({"sensitivitas_batas": [
-                {"tenor": t["label"], "batas_dipakai_bps": t["max_bps"], "batas_alternatif_bps": t["alt_max_bps"],
-                 "hari_terdampak": alt_days[t["key"]], "rate_jika_alternatif": round(alt_valid / total * 100.0, 2),
-                 "catatan": t["catatan_batas"]}
-                for t in tenors if t.get("alt_max_bps")]} if alt_days else {}),
             "sumber": ("rekap BI (ticker Bloomberg tidak valid)" if bank.Bank_ID in rekap_fallback
                        else "sheet manual bank (_ref)" if bank.Bank_ID in manual_ref else "Bloomberg"),
         }}
@@ -655,13 +637,6 @@ def _ingest_bbg_quotes(file_obj, resolver: EntityResolver, source: str) -> Dict[
         "crosscheck_available": bool(rekap_vals),
         "unknown_banks": [],
         "daily": daily,
-        "threshold_notes": [
-            {"tenor": t["label"], "batas_dipakai_bps": t["max_bps"], "batas_alternatif_bps": t["alt_max_bps"],
-             "catatan": t["catatan_batas"],
-             "bank_terdampak": sorted(b for b, bd in breakdown.items()
-                                      if any(x["hari_terdampak"] for x in bd[param].get("sensitivitas_batas", [])))}
-            for t in tenors if t.get("alt_max_bps")
-        ],
         "source_notes": [
             {"bank_id": b, "catatan": "Data Bloomberg kosong/ticker tidak valid; dinilai dari Rekap BI (perlu verifikasi sumber)"}
             for b in sorted(rekap_fallback)

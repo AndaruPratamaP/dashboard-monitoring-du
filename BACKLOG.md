@@ -246,7 +246,7 @@ Pertanyaan untuk mentor:
 
 Keputusan pemilik produk (13 Nov 2026):
 - Pertanyaan 4 terjawab: line yang dibuka **setelah cut-off tetap dihitung**, tetapi diberi tanda pembeda.
-- Pertanyaan 5 **masih menunggu konfirmasi** (Repo 1 minggu 10 vs 20 bps).
+- Pertanyaan 5 **masih menunggu konfirmasi** (Repo 1 minggu 10 vs 20 bps). → Terjawab 15 Nov 2026: **10 bps** (lihat bagian 11).
 
 Belum dikerjakan (sisa P1, masuk Sprint 5):
 - Pemetaan sheet manual di UI (E6-1).
@@ -293,6 +293,14 @@ Belum dikerjakan (sisa P1, masuk Sprint 5):
 - Alur penuh dari database kosong, termasuk "Proses Semua File Lokal" (±25 detik), sudah dicek di browser.
 
 Masih terbuka:
-- Pertanyaan 5: batas Repo 1 minggu 10 vs 20 bps.
 - Login petugas BI (E10-2), bila portal akan dipasang di luar jaringan internal.
 - Upgrade Next.js (E10-4, P2).
+
+## 11. Keputusan 15 Nov 2026
+
+- **Batas spread Repo 1 minggu = 10 bps** sesuai ketentuan (pertanyaan 5). Konsekuensinya:
+  - `QUOTE_SOURCES` diubah;
+  - simulasi 20 vs 10 bps dihapus dari ingest, drawer, dan panel;
+  - workbook konfirmasi menghitung `COUNTIF(<=10)` seperti template BI.
+- Hasil TW III tidak berubah dan tetap 0 selisih dengan rekap BI.
+- Catatan dokumen: M.02/M.01 ril TW III menulis "maksimum 20 bps" untuk kuotasi Repo 1 minggu Deutsche 21 Jul. Dokumen yang dihasilkan sistem kini menulis **10 bps** sesuai ketentuan.

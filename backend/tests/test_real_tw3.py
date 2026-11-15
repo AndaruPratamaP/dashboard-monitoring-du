@@ -174,10 +174,13 @@ def test_05_cutoff_dan_batas_repo_1w(client):
     assert any(l["setelah_cutoff"] for l in client.get("/api/counterparty/DU-11").json())
     # Counterparty OK: line setelah cut-off ditandai (Panin Repo non-DU, OCBC OIS DU) dan tetap dihitung
 
-    # --- Sprint 4: batas Repo 1 minggu menunggu konfirmasi (20 vs 10 bps) -> dilaporkan, TW III tidak terdampak
-    j = client.post("/api/ingest/bbg-repo").json()
-    assert j["threshold_notes"][0]["batas_alternatif_bps"] == 10.0 and j["threshold_notes"][0]["bank_terdampak"] == []
-    # Batas Repo 1W OK: sensitivitas 10 bps dilaporkan; tidak ada bank TW III yang berubah
+    # --- Batas Repo 1 minggu = 10 bps (ketentuan, dikonfirmasi 15 Nov 2026): hasil TW III sama, tetap cocok rekap BI
+    j, below, diffs = ingest(client, "bbg-repo")
+    assert below == {"DU-01": 96.88, "DU-14": 98.44, "DU-16": 96.88} and diffs == set(), (below, diffs)
+    gugur = next(f for f in client.get("/api/findings").json() if f["finding_id"].endswith("DU14-B3"))  # tiket tetap ada
+    assert gugur
+    deutsche = next(x for x in j["per_bank"] if x["bank_id"] == "DU-14")
+    assert deutsche["detail"]["valid_per_tenor"]["1 minggu"] == 63  # 21 Jul (210 bps) satu-satunya hari gugur
 
 
 def test_06_balasan_bank_dan_sanggahan(client):

@@ -22,7 +22,7 @@ import {
 
 // Definisi Parameter PUVA
 const PUVA_PARAMS = [
-  { code: "B1", name: "Repo Quotes", full: "Kuotasi Harga Repo", weight: 2.5, detail: "Setiap hari kerja; spread maks. 5 bps (O/N) & 20 bps (1W, 1M); batas 1W menunggu konfirmasi (template BI: 10 bps)" },
+  { code: "B1", name: "Repo Quotes", full: "Kuotasi Harga Repo", weight: 2.5, detail: "Setiap hari kerja; spread maks. 5 bps (O/N), 10 bps (1W), 20 bps (1M)" },
   { code: "B2", name: "SRBI Quotes", full: "Kuotasi Harga SRBI", weight: 2.5, detail: "Setiap hari kerja; spread maks. 20 bps untuk seluruh seri yang dikuotasi" },
   { code: "B3", name: "OIS Quotes", full: "Kuotasi Harga OIS", weight: 2.5, detail: "Setiap hari kerja; tenor 3 bulan & 12 bulan; spread maks. 20 bps" },
   { code: "B4", name: "Repo Line", full: "Counterparty Line Repo", weight: 7.5, detail: "Minimal 10 bank DU dan 10 bank non-DU pada akhir periode" },

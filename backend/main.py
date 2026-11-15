@@ -324,7 +324,6 @@ async def ingest_real_source(
         },
         "unknown_banks": result["unknown_banks"],
         "source_notes": result.get("source_notes", []),
-        "threshold_notes": result.get("threshold_notes", []),
         "evaluation_summary": sync_result,
     }
 

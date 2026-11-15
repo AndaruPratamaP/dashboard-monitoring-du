@@ -185,14 +185,6 @@ export const DrillDownDrawer: React.FC = () => {
                     .
                   </div>
                 )}
-                {(drillDown.metricDetail.sensitivitas_batas || []).map((t: any) => (
-                  <div key={t.tenor} className="p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-900">
-                    {t.catatan} Dengan batas {t.batas_alternatif_bps} bps:{" "}
-                    {t.hari_terdampak.length === 0
-                      ? "hasil tidak berubah."
-                      : `${t.hari_terdampak.length} hari tambahan gugur (${t.hari_terdampak.map((h: any) => h.tanggal).join(", ")}), nilai menjadi ${t.rate_jika_alternatif}%.`}
-                  </div>
-                ))}
                 {(drillDown.metricDetail.counterparty_setelah_cutoff?.length ?? 0) > 0 && (
                   <div className="p-2.5 rounded-lg bg-sky-50 border border-sky-200 text-xs text-sky-900">
                     Line dibuka setelah cut-off (tetap dihitung): {drillDown.metricDetail.counterparty_setelah_cutoff?.join(", ")}.

@@ -31,7 +31,6 @@ export interface MasterBank {
 export interface ParameterMetricDetail {
   sanggahan_diterima?: number
   rate_sebelum_sanggahan?: number | null
-  sensitivitas_batas?: Array<{ tenor: string; batas_dipakai_bps: number; batas_alternatif_bps: number; hari_terdampak: Array<{ tanggal: string; spread_bps: number }>; rate_jika_alternatif: number; catatan: string }>
   counterparty_setelah_cutoff?: string[]
   valid_days?: number
   total_days?: number

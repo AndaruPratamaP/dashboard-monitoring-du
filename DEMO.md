@@ -19,7 +19,7 @@ Demo memakai file kerja ril TW III (`dataset real proses as is/`). Folder ini ra
 |---|---|---|---|
 | 0–1 | Executive Matrix | Tampilkan matriks kosong | Tidak ada data sample. Periode terbentuk dari tanggal di file sumber. |
 | 1–3 | Data Sumber | **Proses Semua File Lokal** (±25 detik) | 7 sumber terbaca: kuotasi Bloomberg Repo/SRBI/OIS, rasio SRBI, transaksi Repo ≥ 2 minggu & SRBI ≥ 3 bulan, MM OIS, ditambah workbook counterparty. Setiap sumber dicocokkan dengan rekap BI. Selisih yang muncul justru koreksi pasca-konfirmasi (mis. Maybank & BOC HK MM OIS). **Riwayat File Diproses** menampilkan SHA-256 setiap file. |
-| 3–4 | Executive Matrix | Klik sel merah Deutsche B3 dan HSBC B2 | 19 bank Memenuhi; **Deutsche** (OIS 15,62%, line OIS 7) dan **HSBC** (SRBI 75%) Tidak Memenuhi, sama dengan M.01. Drawer menampilkan tanggal gugur, sumber, dan catatan batas Repo 1 minggu (20 vs 10 bps). |
+| 3–4 | Executive Matrix | Klik sel merah Deutsche B3 dan HSBC B2 | 19 bank Memenuhi; **Deutsche** (OIS 15,62%, line OIS 7) dan **HSBC** (SRBI 75%) Tidak Memenuhi, sama dengan M.01. Drawer menampilkan tanggal gugur, sumber, beserta batas spread per tenor. |
 | 4–5 | Workbook Konfirmasi | Unduh workbook Deutsche | 7 sheet format template DPPK, isinya sama dengan kiriman BI. Line counterparty setelah cut-off ditandai **baru**. |
 | 5–7 | Data Sumber → kartu *Balasan bank* | Buka hasil (sudah ikut diproses pada menit 1–3; klik **Lokal** untuk mengulang) | 23 item sanggahan per tanggal dari balasan ril, contohnya BTN SRBI 13 Jul (+ JPEG) dan Mega OIS 14 Jul (+ PNG). Balasan BCA/UOB ber-password dan arsip `.7z` DBS ditandai *perlu tindakan manual*. Tunjukkan **atur sheet**: pemetaan manual bila nama sheet bank tidak dikenali. |
 | 7–8 | Rekonsiliasi Sanggahan | Buka BTN → pratinjau JPEG; buka Maybank → **Terima** | Pre-check PADG (rekap BI vs isian bank, spread vs batas, bukti, dampak). Setelah diterima, Maybank B8 naik ke 100% dan tercatat di riwayat. Tolak BTN 13 Jul (spread 85 bps memang di atas 20 bps). |
@@ -43,7 +43,7 @@ Di Rekonsiliasi Sanggahan, buka ronde baru dengan tenggat, lalu impor ulang bala
 ## Pertanyaan yang mungkin muncul
 
 - **Kenapa ada selisih dengan rekap BI?** Rekap BI adalah versi pasca-konfirmasi. Sistem menghitung dari data mentah, lalu sanggahan yang diterima menutup selisihnya. Itu sebabnya hasil akhir sama dengan M.02.
-- **Batas Repo 1 minggu?** Batas resmi masih menunggu konfirmasi. Sistem memakai 20 bps dan menampilkan simulasi 10 bps; di TW III tidak ada bank yang berubah.
+- **Batas Repo 1 minggu?** 10 bps sesuai ketentuan, sama dengan template kuotasi BI. Hasil TW III tidak berubah dibanding 20 bps. Satu-satunya hari gugur, Deutsche 21 Jul, spread-nya 210 bps.
 - **Apakah bank bisa mengakses sistem?** Tidak. Portal hanya untuk petugas BI. Bank menerima workbook dan surat, lalu membalas lewat email.
 
 ## Verifikasi otomatis
